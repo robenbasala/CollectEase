@@ -1,16 +1,92 @@
 import { useEffect, useMemo, useState } from "react";
+import { Building2 } from "lucide-react";
 import { Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
 import { api } from "./api/apiClient";
-import { getActiveCompanyId } from "./config/company.js";
+import { useAuth } from "./context/AuthContext.jsx";
 import Navbar from "./components/Navbar";
 import Dashboard from "./pages/Dashboard";
 import PropertyDetails from "./pages/PropertyDetails";
 import AdminPage from "./pages/AdminPage";
 import SettingsPage from "./pages/SettingsPage";
+import ReminderEmailHistoryPage from "./pages/ReminderEmailHistoryPage";
+import LoginPage from "./pages/LoginPage.jsx";
+import FinishSignInPage from "./pages/FinishSignInPage.jsx";
+import PasswordActionPage from "./pages/PasswordActionPage.jsx";
+import Spinner from "./components/Spinner";
+
+function NoInvitationPage({ onSignOut }) {
+  return (
+    <div className="auth-shell">
+      <div className="auth-shell__bg" aria-hidden />
+      <div className="auth-shell__glow auth-shell__glow--1" aria-hidden />
+      <div className="auth-shell__glow auth-shell__glow--2" aria-hidden />
+      <div className="auth-glass auth-glass--narrow">
+        <div className="auth-glass__brand">
+          <span className="auth-glass__logo-wrap" aria-hidden>
+            <Building2 size={22} strokeWidth={2.1} />
+          </span>
+          <span className="auth-glass__name">CollectEase</span>
+        </div>
+        <h1 className="auth-glass__title">No invitation</h1>
+        <p className="auth-glass__lead">
+          You signed in, but there is no access profile for this account yet. Ask your administrator to invite this exact email,
+          then use the password link from the invitation email before signing in here.
+        </p>
+        <button type="button" className="btn btn-primary auth-glass__cta" onClick={onSignOut}>
+          Sign out
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function RequireAuth({ children }) {
+  const { firebaseConfigured, loading, firebaseUser, user, error, logout } = useAuth();
+
+  if (!firebaseConfigured) {
+    return (
+      <div className="page">
+        <p style={{ color: "var(--color-danger)" }}>Firebase is not configured. Set VITE_FIREBASE_* variables in .env.</p>
+      </div>
+    );
+  }
+  if (loading) {
+    return (
+      <div className="page">
+        <Spinner />
+      </div>
+    );
+  }
+  if (!firebaseUser) {
+    return <Navigate to="/login" replace />;
+  }
+  if (!user) {
+    if (error === "no_invite") {
+      return <NoInvitationPage onSignOut={logout} />;
+    }
+    return (
+      <div className="page">
+        <Spinner />
+        {error ? (
+          <p className="text-muted" style={{ marginTop: "0.5rem", whiteSpace: "pre-wrap", maxWidth: "42rem" }}>
+            {error}
+          </p>
+        ) : null}
+      </div>
+    );
+  }
+  return children;
+}
 
 function AppLayout() {
   const location = useLocation();
-  const companyId = useMemo(() => getActiveCompanyId(), []);
+  const { user, effectiveCompanyId, isSuperAdmin } = useAuth();
+
+  const apiCompanyId = useMemo(() => {
+    if (!user) return null;
+    if (isSuperAdmin) return effectiveCompanyId ?? user.companyId ?? null;
+    return user.companyId ?? null;
+  }, [user, isSuperAdmin, effectiveCompanyId]);
 
   const [regions, setRegions] = useState([]);
   const [selectedRegion, setSelectedRegion] = useState("");
@@ -26,6 +102,10 @@ function AppLayout() {
     let cancelled = false;
     (async () => {
       if (isSettingsRoute) {
+        setLoadingRegions(false);
+        return;
+      }
+      if (apiCompanyId == null) {
         setLoadingRegions(false);
         return;
       }
@@ -47,10 +127,11 @@ function AppLayout() {
     return () => {
       cancelled = true;
     };
-  }, [location.pathname]);
+  }, [location.pathname, isSettingsRoute, apiCompanyId]);
 
   useEffect(() => {
     if (location.pathname === "/settings") return;
+    if (apiCompanyId == null) return;
     let cancelled = false;
     (async () => {
       try {
@@ -62,13 +143,13 @@ function AppLayout() {
           companyDisplayName: s.companyDisplayName || null
         });
       } catch {
-        /* optional: table or columns missing */
+        /* optional */
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [location.pathname]);
+  }, [location.pathname, apiCompanyId]);
 
   useEffect(() => {
     function onCompanySettingsUpdated(e) {
@@ -108,7 +189,7 @@ function AppLayout() {
           selectedRegion,
           setSelectedRegion,
           loadingRegions,
-          companyId
+          companyId: apiCompanyId
         }}
       />
     </div>
@@ -118,10 +199,20 @@ function AppLayout() {
 export default function App() {
   return (
     <Routes>
-      <Route element={<AppLayout />}>
+      <Route path="/login" element={<LoginPage />} />
+      <Route path="/reset-password" element={<PasswordActionPage />} />
+      <Route path="/finish-signin" element={<FinishSignInPage />} />
+      <Route
+        element={
+          <RequireAuth>
+            <AppLayout />
+          </RequireAuth>
+        }
+      >
         <Route path="/" element={<Dashboard />} />
         <Route path="/property/:propertyName" element={<PropertyDetails />} />
         <Route path="/admin" element={<AdminPage />} />
+        <Route path="/reminder-emails" element={<ReminderEmailHistoryPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

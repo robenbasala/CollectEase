@@ -1,6 +1,12 @@
 const { sql, query } = require("../db");
 const col = require("../helpers/columnMap");
-const { readActiveCompanyId } = require("../config/activeCompany");
+const {
+  readCompanyContext,
+  intersectRequestedProperties,
+  dataTblPropertyScopeSql,
+  propertiesTableScopeSql,
+  memberCanAccessProperty
+} = require("../helpers/companyContext");
 
 function q(name) {
   return `[${col[name]}]`;
@@ -18,6 +24,7 @@ const LPD = q("lastPaymentDate");
 const LPA = q("lastPaymentAmount");
 const PH = q("phone");
 const EM = q("email");
+const TC = q("tenantCode");
 /** Row balance/rent as DECIMAL with 0 fallback — avoids NULL in comparisons (SUM was silently dropping rows). */
 const DT_BAL = `ISNULL(TRY_CAST(dt.${B} AS DECIMAL(18,4)), 0)`;
 const DT_RENT = `ISNULL(TRY_CAST(dt.${RT} AS DECIMAL(18,4)), 0)`;
@@ -161,55 +168,88 @@ const DLQ_IN_LEGAL = `CASE
   THEN 1 ELSE 0 END`;
 
 async function getRegions(req, res) {
-  const companyId = readActiveCompanyId(res);
-  if (companyId == null) return;
-
-  const text = `
+  const ctx = readCompanyContext(req, res);
+  if (!ctx) return;
+  const inputs = { companyId: { type: sql.Int, value: ctx.companyId } };
+  let text;
+  if (ctx.role === "super_admin" || ctx.role === "company_admin") {
+    text = `
     SELECT Name AS value
     FROM dbo.Regions
     WHERE CompanyId = @companyId
       AND Name IS NOT NULL AND LTRIM(RTRIM(CAST(Name AS NVARCHAR(400)))) <> N''
-    ORDER BY Name
-  `;
-  const result = await query(text, {
-    companyId: { type: sql.Int, value: companyId }
-  });
+    ORDER BY Name`;
+  } else {
+    text = `
+    SELECT DISTINCT r.Name AS value
+    FROM dbo.Regions r
+    INNER JOIN dbo.Portfolios p ON p.RegionId = r.Id AND p.CompanyId = r.CompanyId
+    INNER JOIN dbo.Properties pr ON pr.PortfolioId = p.Id AND pr.CompanyId = r.CompanyId
+    WHERE r.CompanyId = @companyId
+      AND r.Name IS NOT NULL AND LTRIM(RTRIM(CAST(r.Name AS NVARCHAR(400)))) <> N''
+      ${propertiesTableScopeSql(ctx, inputs, "pr", "srPr")}
+    ORDER BY r.Name`;
+  }
+  const result = await query(text, inputs);
   res.json({ regions: result.recordset.map((r) => r.value) });
 }
 
 async function getPortfolios(req, res) {
-  const companyId = readActiveCompanyId(res);
-  if (companyId == null) return;
+  const ctx = readCompanyContext(req, res);
+  if (!ctx) return;
 
   const region = req.query.region;
   if (!region) {
     return res.status(400).json({ error: "region is required" });
   }
-  const text = `
+  const inputs = {
+    companyId: { type: sql.Int, value: ctx.companyId },
+    region: { type: sql.NVarChar(400), value: region }
+  };
+  let text;
+  if (ctx.role === "super_admin" || ctx.role === "company_admin") {
+    text = `
     SELECT DISTINCT p.Name AS value
     FROM dbo.Portfolios p
     INNER JOIN dbo.Regions r ON r.Id = p.RegionId AND r.CompanyId = @companyId
     WHERE p.CompanyId = @companyId
       AND r.Name = @region
       AND p.Name IS NOT NULL AND LTRIM(RTRIM(CAST(p.Name AS NVARCHAR(400)))) <> N''
-    ORDER BY value
-  `;
-  const result = await query(text, {
-    companyId: { type: sql.Int, value: companyId },
-    region: { type: sql.NVarChar(400), value: region }
-  });
+    ORDER BY value`;
+  } else {
+    text = `
+    SELECT DISTINCT p.Name AS value
+    FROM dbo.Portfolios p
+    INNER JOIN dbo.Regions r ON r.Id = p.RegionId AND r.CompanyId = @companyId
+    INNER JOIN dbo.Properties pr ON pr.PortfolioId = p.Id AND pr.CompanyId = @companyId
+    WHERE p.CompanyId = @companyId
+      AND r.Name = @region
+      AND p.Name IS NOT NULL AND LTRIM(RTRIM(CAST(p.Name AS NVARCHAR(400)))) <> N''
+      ${propertiesTableScopeSql(ctx, inputs, "pr", "spPr")}
+    ORDER BY value`;
+  }
+  const result = await query(text, inputs);
   res.json({ portfolios: result.recordset.map((r) => r.value) });
 }
 
 async function getProperties(req, res) {
-  const companyId = readActiveCompanyId(res);
-  if (companyId == null) return;
+  const ctx = readCompanyContext(req, res);
+  if (!ctx) return;
 
   const region = req.query.region;
   const portfolio = req.query.portfolio;
   if (!region || !portfolio) {
     return res.status(400).json({ error: "region and portfolio are required" });
   }
+  const inputs = {
+    companyId: { type: sql.Int, value: ctx.companyId },
+    region: { type: sql.NVarChar(400), value: region },
+    portfolio: { type: sql.NVarChar(400), value: portfolio }
+  };
+  const scope =
+    ctx.role === "super_admin" || ctx.role === "company_admin"
+      ? ""
+      : propertiesTableScopeSql(ctx, inputs, "pr", "gpPr");
   const text = `
     SELECT DISTINCT pr.Name AS value
     FROM dbo.Properties pr
@@ -219,24 +259,26 @@ async function getProperties(req, res) {
       AND r.Name = @region
       AND p.Name = @portfolio
       AND pr.Name IS NOT NULL AND LTRIM(RTRIM(CAST(pr.Name AS NVARCHAR(400)))) <> N''
+      ${scope}
     ORDER BY value
   `;
-  const result = await query(text, {
-    companyId: { type: sql.Int, value: companyId },
-    region: { type: sql.NVarChar(400), value: region },
-    portfolio: { type: sql.NVarChar(400), value: portfolio }
-  });
+  const result = await query(text, inputs);
   res.json({ properties: result.recordset.map((r) => r.value) });
 }
 
 async function getSummary(req, res) {
-  const companyId = readActiveCompanyId(res);
-  if (companyId == null) return;
+  const ctx = readCompanyContext(req, res);
+  if (!ctx) return;
 
   const region = req.query.region;
   if (!region) {
     return res.status(400).json({ error: "region is required" });
   }
+  const inputs = {
+    companyId: { type: sql.Int, value: ctx.companyId },
+    region: { type: sql.NVarChar(400), value: region }
+  };
+  const propScope = dataTblPropertyScopeSql(ctx, inputs);
   const text = `
     SELECT
       po.Name AS portfolio,
@@ -287,14 +329,12 @@ async function getSummary(req, res) {
     WHERE dt.${CC} = @companyId
       AND reg.Name = @region
       AND dt.${PR} IS NOT NULL
+      ${propScope}
     GROUP BY po.Name, dt.${PR}
     HAVING po.Name IS NOT NULL AND dt.${PR} IS NOT NULL
     ORDER BY po.Name, dt.${PR}
   `;
-  const result = await query(text, {
-    companyId: { type: sql.Int, value: companyId },
-    region: { type: sql.NVarChar(400), value: region }
-  });
+  const result = await query(text, inputs);
   const byPortfolio = new Map();
   for (const row of result.recordset) {
     const key = row.portfolio;
@@ -466,8 +506,8 @@ function parsePropertiesList(req) {
 }
 
 async function getUnits(req, res) {
-  const companyId = readActiveCompanyId(res);
-  if (companyId == null) return;
+  const ctx = readCompanyContext(req, res);
+  if (!ctx) return;
 
   const propertyNames = parsePropertiesList(req);
   if (propertyNames.length === 0) {
@@ -475,6 +515,11 @@ async function getUnits(req, res) {
   }
   if (propertyNames.length > MAX_UNITS_PROPERTIES) {
     return res.status(400).json({ error: `At most ${MAX_UNITS_PROPERTIES} properties per request` });
+  }
+  const companyId = ctx.companyId;
+  const allowed = intersectRequestedProperties(ctx, propertyNames);
+  if (allowed.length === 0) {
+    return res.status(403).json({ error: "No access to the requested properties." });
   }
   const nameSearch = req.query.name ? String(req.query.name).trim() : "";
   const unitSearch = req.query.unit ? String(req.query.unit).trim() : "";
@@ -489,7 +534,7 @@ async function getUnits(req, res) {
   const occRaw = req.query.occupied ? String(req.query.occupied).trim().toLowerCase() : "";
   const occupiedOnly = occRaw === "1" || occRaw === "true";
 
-  const inPlaceholders = propertyNames.map((_, i) => `@prop${i}`).join(", ");
+  const inPlaceholders = allowed.map((_, i) => `@prop${i}`).join(", ");
   let text = `
     SELECT
       dt.${PR} AS property,
@@ -513,7 +558,7 @@ async function getUnits(req, res) {
     WHERE dt.${CC} = @companyId AND dt.${PR} IN (${inPlaceholders})
   `;
   const inputs = { companyId: { type: sql.Int, value: companyId } };
-  propertyNames.forEach((name, i) => {
+  allowed.forEach((name, i) => {
     inputs[`prop${i}`] = { type: sql.NVarChar(400), value: name };
   });
   if (nameSearch) {
@@ -607,10 +652,428 @@ async function getUnits(req, res) {
   res.json({ units, erpStaticLink });
 }
 
+function tenantCodeMatchSql() {
+  return `AND (
+    (@tenantCode IS NULL OR LTRIM(RTRIM(CAST(@tenantCode AS NVARCHAR(400)))) = N'')
+      AND (dt.${TC} IS NULL OR LTRIM(RTRIM(CAST(dt.${TC} AS NVARCHAR(400)))) = N'')
+    OR (
+      @tenantCode IS NOT NULL AND LTRIM(RTRIM(CAST(@tenantCode AS NVARCHAR(400)))) <> N''
+      AND LTRIM(RTRIM(CAST(dt.${TC} AS NVARCHAR(400)))) = LTRIM(RTRIM(CAST(@tenantCode AS NVARCHAR(400))))
+    )
+  )`;
+}
+
+function baseRowInputs(companyId, property, unit, name, tenantCode) {
+  const tc = tenantCode != null ? String(tenantCode).trim() : "";
+  return {
+    companyId: { type: sql.Int, value: companyId },
+    property: { type: sql.NVarChar(400), value: String(property ?? "").trim() },
+    unit: { type: sql.NVarChar(400), value: String(unit ?? "").trim() },
+    name: { type: sql.NVarChar(400), value: String(name ?? "").trim() },
+    tenantCode: { type: sql.NVarChar(200), value: tc === "" ? null : tc }
+  };
+}
+
+async function patchUnitRow(req, res) {
+  const ctx = readCompanyContext(req, res);
+  if (!ctx) return;
+  const companyId = ctx.companyId;
+
+  const b = req.body || {};
+  const property = b.property != null ? String(b.property).trim() : "";
+  const unit = b.unit != null ? String(b.unit).trim() : "";
+  const name = b.name != null ? String(b.name).trim() : "";
+  if (!property || !unit || !name) {
+    return res.status(400).json({ error: "property, unit, and name are required" });
+  }
+  if (!memberCanAccessProperty(ctx, property)) {
+    return res.status(403).json({ error: "No access to this property." });
+  }
+
+  const hasNf = Object.prototype.hasOwnProperty.call(b, "nextFollowUp");
+  const hasLs = Object.prototype.hasOwnProperty.call(b, "legalStatus");
+  if (!hasNf && !hasLs) {
+    return res.status(400).json({ error: "Provide nextFollowUp and/or legalStatus" });
+  }
+
+  const inputs = baseRowInputs(companyId, property, unit, name, b.tenantCode);
+  const tmatch = tenantCodeMatchSql();
+
+  let oldLegal = null;
+  if (hasLs) {
+    const cur = await query(
+      `SELECT TOP 1 CAST(dt.${LS} AS NVARCHAR(400)) AS ls
+       FROM dbo.DataTbl dt
+       WHERE dt.${CC} = @companyId AND dt.${PR} = @property AND dt.${U} = @unit AND dt.${N} = @name ${tmatch}`,
+      inputs
+    );
+    oldLegal = cur.recordset[0]?.ls != null ? String(cur.recordset[0].ls) : "";
+  }
+
+  const sets = [];
+  if (hasNf) {
+    const v = b.nextFollowUp;
+    if (v === null || v === "") {
+      sets.push(`dt.${NF} = NULL`);
+    } else {
+      const d = new Date(String(v));
+      if (Number.isNaN(d.getTime())) {
+        return res.status(400).json({ error: "nextFollowUp must be a valid date or empty" });
+      }
+      sets.push(`dt.${NF} = @nextFollowUp`);
+      inputs.nextFollowUp = { type: sql.DateTime2, value: d };
+    }
+  }
+  if (hasLs) {
+    const ls = b.legalStatus === null || b.legalStatus === "" ? null : String(b.legalStatus).trim().slice(0, 400);
+    sets.push(`dt.${LS} = @legalStatus`);
+    inputs.legalStatus = { type: sql.NVarChar(400), value: ls };
+  }
+
+  const setSql = sets.join(", ");
+  const result = await query(
+    `UPDATE dt SET ${setSql}
+     FROM dbo.DataTbl dt
+     WHERE dt.${CC} = @companyId AND dt.${PR} = @property AND dt.${U} = @unit AND dt.${N} = @name ${tmatch}`,
+    inputs
+  );
+  const n = result.rowsAffected != null ? result.rowsAffected[0] : 0;
+  if (!n) {
+    return res.status(404).json({ error: "No matching unit row (check property, unit, name, tenant code)" });
+  }
+
+  if (hasLs) {
+    const newLs = b.legalStatus === null || b.legalStatus === "" ? "" : String(b.legalStatus).trim();
+    const oldStr = oldLegal != null ? String(oldLegal) : "";
+    if (oldStr !== newLs) {
+      try {
+        await query(
+          `INSERT INTO dbo.UnitLegalStatusHistory (
+             CompanyId, PropertyName, Unit, TenantName, TenantCode, OldStatus, NewStatus
+           ) VALUES (
+             @companyId, @property, @unit, @name, @tenantCodeHist, @oldStatus, @newStatus
+           )`,
+          {
+            companyId: inputs.companyId,
+            property: inputs.property,
+            unit: inputs.unit,
+            name: inputs.name,
+            tenantCodeHist: {
+              type: sql.NVarChar(200),
+              value:
+                inputs.tenantCode && inputs.tenantCode.value != null && String(inputs.tenantCode.value).trim() !== ""
+                  ? String(inputs.tenantCode.value).trim()
+                  : null
+            },
+            oldStatus: { type: sql.NVarChar(400), value: oldStr || null },
+            newStatus: { type: sql.NVarChar(400), value: newLs || "" }
+          }
+        );
+      } catch (e) {
+        if (!/Invalid object name/i.test(String(e?.message || ""))) throw e;
+      }
+    }
+  }
+
+  res.json({ ok: true });
+}
+
+async function getUnitNotes(req, res) {
+  const ctx = readCompanyContext(req, res);
+  if (!ctx) return;
+  const companyId = ctx.companyId;
+  const property = req.query.property ? String(req.query.property).trim() : "";
+  const unit = req.query.unit ? String(req.query.unit).trim() : "";
+  const name = req.query.name ? String(req.query.name).trim() : "";
+  if (!property || !unit || !name) {
+    return res.status(400).json({ error: "property, unit, and name query params are required" });
+  }
+  if (!memberCanAccessProperty(ctx, property)) {
+    return res.status(403).json({ error: "No access to this property." });
+  }
+  const inputs = baseRowInputs(companyId, property, unit, name, req.query.tenantCode);
+  inputs.tenantCodeQ = inputs.tenantCode;
+  delete inputs.tenantCode;
+
+  try {
+    const result = await query(
+      `SELECT Id, Body, IsPinned, IsHighlighted, CreatedAt, CreatedByName, NoteSource
+       FROM dbo.UnitDetailNote
+       WHERE CompanyId = @companyId AND PropertyName = @property AND Unit = @unit AND TenantName = @name
+         AND (
+           (@tenantCodeQ IS NULL OR LTRIM(RTRIM(CAST(@tenantCodeQ AS NVARCHAR(400)))) = N'')
+             AND (TenantCode IS NULL OR LTRIM(RTRIM(CAST(TenantCode AS NVARCHAR(400)))) = N'')
+           OR (
+             @tenantCodeQ IS NOT NULL AND LTRIM(RTRIM(CAST(@tenantCodeQ AS NVARCHAR(400)))) <> N''
+             AND LTRIM(RTRIM(CAST(TenantCode AS NVARCHAR(400)))) = LTRIM(RTRIM(CAST(@tenantCodeQ AS NVARCHAR(400))))
+           )
+         )
+       ORDER BY IsPinned DESC, CreatedAt DESC`,
+      inputs
+    );
+    const notes = (result.recordset || []).map((r) => ({
+      id: r.Id ?? r.id,
+      body: r.Body ?? r.body ?? "",
+      isPinned: Boolean(r.IsPinned ?? r.isPinned),
+      isHighlighted: Boolean(r.IsHighlighted ?? r.isHighlighted),
+      createdByName: r.CreatedByName != null ? String(r.CreatedByName).trim() : "",
+      noteSource: String(r.NoteSource ?? r.noteSource ?? "manual").toLowerCase() === "auto" ? "auto" : "manual",
+      createdAt:
+        r.CreatedAt instanceof Date ? r.CreatedAt.toISOString() : r.CreatedAt != null ? String(r.CreatedAt) : null
+    }));
+    res.json({ notes });
+  } catch (err) {
+    if (/Invalid object name/i.test(String(err?.message || ""))) {
+      return res.json({ notes: [] });
+    }
+    if (/NoteSource/i.test(String(err?.message || "")) && /Invalid column name/i.test(String(err?.message || ""))) {
+      return res.status(503).json({
+        error: "Run backend/scripts/migrate-unit-detail-note-source.sql on the database."
+      });
+    }
+    throw err;
+  }
+}
+
+async function postUnitNote(req, res) {
+  const ctx = readCompanyContext(req, res);
+  if (!ctx) return;
+  const companyId = ctx.companyId;
+  const b = req.body || {};
+  const property = b.property != null ? String(b.property).trim() : "";
+  const unit = b.unit != null ? String(b.unit).trim() : "";
+  const name = b.name != null ? String(b.name).trim() : "";
+  const bodyText = b.body != null ? String(b.body).trim() : "";
+  if (!property || !unit || !name || !bodyText) {
+    return res.status(400).json({ error: "property, unit, name, and body are required" });
+  }
+  if (!memberCanAccessProperty(ctx, property)) {
+    return res.status(403).json({ error: "No access to this property." });
+  }
+  if (bodyText.length > 4000) {
+    return res.status(400).json({ error: "body is too long (max 4000)" });
+  }
+  const inputs = baseRowInputs(companyId, property, unit, name, b.tenantCode);
+  inputs.body = { type: sql.NVarChar(4000), value: bodyText };
+  inputs.isPinned = { type: sql.Bit, value: Boolean(b.isPinned) };
+  inputs.isHighlighted = { type: sql.Bit, value: Boolean(b.isHighlighted) };
+  const authorRaw = b.createdByName != null ? String(b.createdByName).trim() : "";
+  const author = authorRaw.slice(0, 256);
+  inputs.createdByName = { type: sql.NVarChar(256), value: author === "" ? null : author };
+  let noteSource = b.noteSource != null ? String(b.noteSource).trim().toLowerCase() : "manual";
+  if (noteSource !== "manual" && noteSource !== "auto") noteSource = "manual";
+  inputs.noteSource = { type: sql.NVarChar(16), value: noteSource };
+
+  try {
+    const result = await query(
+      `INSERT INTO dbo.UnitDetailNote (
+         CompanyId, PropertyName, Unit, TenantName, TenantCode, Body, IsPinned, IsHighlighted, CreatedByName, NoteSource
+       ) OUTPUT INSERTED.Id, INSERTED.Body, INSERTED.IsPinned, INSERTED.IsHighlighted, INSERTED.CreatedAt, INSERTED.CreatedByName, INSERTED.NoteSource
+       VALUES (
+         @companyId, @property, @unit, @name,
+         CASE WHEN @tenantCode IS NULL OR LTRIM(RTRIM(CAST(@tenantCode AS NVARCHAR(400)))) = N'' THEN NULL ELSE LTRIM(RTRIM(CAST(@tenantCode AS NVARCHAR(400)))) END,
+         @body, @isPinned, @isHighlighted, @createdByName, @noteSource
+       )`,
+      inputs
+    );
+    const r = result.recordset[0];
+    res.status(201).json({
+      note: {
+        id: r.Id ?? r.id,
+        body: r.Body ?? r.body,
+        isPinned: Boolean(r.IsPinned ?? r.isPinned),
+        isHighlighted: Boolean(r.IsHighlighted ?? r.isHighlighted),
+        createdByName: r.CreatedByName != null ? String(r.CreatedByName).trim() : "",
+        noteSource: String(r.NoteSource ?? r.noteSource ?? "manual").toLowerCase() === "auto" ? "auto" : "manual",
+        createdAt: r.CreatedAt instanceof Date ? r.CreatedAt.toISOString() : String(r.CreatedAt)
+      }
+    });
+  } catch (err) {
+    if (/Invalid object name/i.test(String(err?.message || ""))) {
+      return res.status(503).json({
+        error: "Run backend/scripts/migrate-unit-detail-row-extras.sql on the database."
+      });
+    }
+    if (/CreatedByName/i.test(String(err?.message || "")) && /Invalid column name/i.test(String(err?.message || ""))) {
+      return res.status(503).json({
+        error: "Run backend/scripts/migrate-unit-detail-note-author.sql on the database (adds note author column)."
+      });
+    }
+    if (/NoteSource/i.test(String(err?.message || "")) && /Invalid column name/i.test(String(err?.message || ""))) {
+      return res.status(503).json({
+        error: "Run backend/scripts/migrate-unit-detail-note-source.sql on the database (adds note source column)."
+      });
+    }
+    throw err;
+  }
+}
+
+async function patchUnitNote(req, res) {
+  const ctx = readCompanyContext(req, res);
+  if (!ctx) return;
+  const companyId = ctx.companyId;
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ error: "invalid note id" });
+  }
+  const b = req.body || {};
+  const inputs = { id: { type: sql.Int, value: id }, companyId: { type: sql.Int, value: companyId } };
+  const pre = await query(
+    `SELECT PropertyName AS pn, CAST(NoteSource AS NVARCHAR(16)) AS src
+     FROM dbo.UnitDetailNote WHERE Id = @id AND CompanyId = @companyId`,
+    inputs
+  );
+  const row0 = pre.recordset[0];
+  const pn = row0?.pn ?? row0?.Pn;
+  if (pn == null) {
+    return res.status(404).json({ error: "not found" });
+  }
+  if (!memberCanAccessProperty(ctx, pn)) {
+    return res.status(403).json({ error: "No access to this note." });
+  }
+
+  const sets = [];
+  if (Object.prototype.hasOwnProperty.call(b, "isPinned")) {
+    sets.push("IsPinned = @isPinned");
+    inputs.isPinned = { type: sql.Bit, value: Boolean(b.isPinned) };
+  }
+  if (Object.prototype.hasOwnProperty.call(b, "isHighlighted")) {
+    sets.push("IsHighlighted = @isHighlighted");
+    inputs.isHighlighted = { type: sql.Bit, value: Boolean(b.isHighlighted) };
+  }
+  if (Object.prototype.hasOwnProperty.call(b, "body")) {
+    const src = String(row0?.src ?? "manual").toLowerCase();
+    if (src === "auto") {
+      return res.status(400).json({ error: "Automatic notes cannot be edited" });
+    }
+    const t = b.body != null ? String(b.body).trim() : "";
+    if (!t) {
+      return res.status(400).json({ error: "body cannot be empty" });
+    }
+    if (t.length > 4000) {
+      return res.status(400).json({ error: "body is too long (max 4000)" });
+    }
+    sets.push("Body = @body");
+    inputs.body = { type: sql.NVarChar(4000), value: t };
+  }
+  if (!sets.length) {
+    return res.status(400).json({ error: "Provide body, isPinned, and/or isHighlighted" });
+  }
+
+  const result = await query(
+    `UPDATE dbo.UnitDetailNote SET ${sets.join(", ")}
+     OUTPUT INSERTED.Id, INSERTED.Body, INSERTED.IsPinned, INSERTED.IsHighlighted, INSERTED.CreatedAt, INSERTED.CreatedByName, INSERTED.NoteSource
+     WHERE Id = @id AND CompanyId = @companyId`,
+    inputs
+  );
+  if (!result.recordset?.length) {
+    return res.status(404).json({ error: "not found" });
+  }
+  const r = result.recordset[0];
+  res.json({
+    note: {
+      id: r.Id ?? r.id,
+      body: r.Body ?? r.body,
+      isPinned: Boolean(r.IsPinned ?? r.isPinned),
+      isHighlighted: Boolean(r.IsHighlighted ?? r.isHighlighted),
+      createdByName: r.CreatedByName != null ? String(r.CreatedByName).trim() : "",
+      noteSource: String(r.NoteSource ?? r.noteSource ?? "manual").toLowerCase() === "auto" ? "auto" : "manual",
+      createdAt: r.CreatedAt instanceof Date ? r.CreatedAt.toISOString() : String(r.CreatedAt)
+    }
+  });
+}
+
+async function deleteUnitNote(req, res) {
+  const ctx = readCompanyContext(req, res);
+  if (!ctx) return;
+  const companyId = ctx.companyId;
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ error: "invalid note id" });
+  }
+  const inputs = { id: { type: sql.Int, value: id }, companyId: { type: sql.Int, value: companyId } };
+  const pre = await query(
+    `SELECT PropertyName AS pn FROM dbo.UnitDetailNote WHERE Id = @id AND CompanyId = @companyId`,
+    inputs
+  );
+  const pn = pre.recordset[0]?.pn ?? pre.recordset[0]?.Pn;
+  if (pn == null) {
+    return res.status(404).json({ error: "not found" });
+  }
+  if (!memberCanAccessProperty(ctx, pn)) {
+    return res.status(403).json({ error: "No access to this note." });
+  }
+
+  const result = await query(
+    `DELETE FROM dbo.UnitDetailNote OUTPUT DELETED.Id WHERE Id = @id AND CompanyId = @companyId`,
+    inputs
+  );
+  const n = result.rowsAffected != null ? result.rowsAffected[0] : 0;
+  if (!n) {
+    return res.status(404).json({ error: "not found" });
+  }
+  res.status(204).end();
+}
+
+async function getUnitLegalHistory(req, res) {
+  const ctx = readCompanyContext(req, res);
+  if (!ctx) return;
+  const companyId = ctx.companyId;
+  const property = req.query.property ? String(req.query.property).trim() : "";
+  const unit = req.query.unit ? String(req.query.unit).trim() : "";
+  const name = req.query.name ? String(req.query.name).trim() : "";
+  if (!property || !unit || !name) {
+    return res.status(400).json({ error: "property, unit, and name query params are required" });
+  }
+  if (!memberCanAccessProperty(ctx, property)) {
+    return res.status(403).json({ error: "No access to this property." });
+  }
+  const inputs2 = baseRowInputs(companyId, property, unit, name, req.query.tenantCode);
+  inputs2.tenantCodeQ = inputs2.tenantCode;
+  delete inputs2.tenantCode;
+
+  try {
+    const result = await query(
+      `SELECT TOP 100 Id, OldStatus, NewStatus, ChangedAt
+       FROM dbo.UnitLegalStatusHistory
+       WHERE CompanyId = @companyId AND PropertyName = @property AND Unit = @unit AND TenantName = @name
+         AND (
+           (@tenantCodeQ IS NULL OR LTRIM(RTRIM(CAST(@tenantCodeQ AS NVARCHAR(400)))) = N'')
+             AND (TenantCode IS NULL OR LTRIM(RTRIM(CAST(TenantCode AS NVARCHAR(400)))) = N'')
+           OR (
+             @tenantCodeQ IS NOT NULL AND LTRIM(RTRIM(CAST(@tenantCodeQ AS NVARCHAR(400)))) <> N''
+             AND LTRIM(RTRIM(CAST(TenantCode AS NVARCHAR(400)))) = LTRIM(RTRIM(CAST(@tenantCodeQ AS NVARCHAR(400))))
+           )
+         )
+       ORDER BY ChangedAt DESC`,
+      inputs2
+    );
+    res.json({
+      entries: (result.recordset || []).map((r) => ({
+        id: r.Id ?? r.id,
+        oldStatus: r.OldStatus ?? r.oldStatus ?? "",
+        newStatus: r.NewStatus ?? r.newStatus ?? "",
+        changedAt: r.ChangedAt instanceof Date ? r.ChangedAt.toISOString() : String(r.ChangedAt ?? "")
+      }))
+    });
+  } catch (err) {
+    if (/Invalid object name/i.test(String(err?.message || ""))) {
+      return res.json({ entries: [] });
+    }
+    throw err;
+  }
+}
+
 module.exports = {
   getRegions,
   getPortfolios,
   getProperties,
   getSummary,
-  getUnits
+  getUnits,
+  patchUnitRow,
+  getUnitNotes,
+  postUnitNote,
+  patchUnitNote,
+  deleteUnitNote,
+  getUnitLegalHistory
 };

@@ -1,5 +1,5 @@
 const { sql, query } = require("../db");
-const { readActiveCompanyId } = require("../config/activeCompany");
+const { readCompanyContext } = require("../helpers/companyContext");
 const {
   normalizeUnitDetailColumnPrefs,
   parsePrefsJson
@@ -87,8 +87,9 @@ function isForeignKeyViolation(err) {
 }
 
 async function listRegions(req, res) {
-  const companyId = readActiveCompanyId(res);
-  if (companyId == null) return;
+  const ctx = readCompanyContext(req, res);
+  if (!ctx) return;
+  const companyId = ctx.companyId;
 
   const result = await query(
     `SELECT Id, Name, CompanyId FROM dbo.Regions WHERE CompanyId = @companyId ORDER BY Name`,
@@ -98,8 +99,9 @@ async function listRegions(req, res) {
 }
 
 async function createRegion(req, res) {
-  const companyId = readActiveCompanyId(res);
-  if (companyId == null) return;
+  const ctx = readCompanyContext(req, res);
+  if (!ctx) return;
+  const companyId = ctx.companyId;
 
   const name = req.body?.name;
   if (!name || !String(name).trim()) {
@@ -116,8 +118,9 @@ async function createRegion(req, res) {
 }
 
 async function updateRegion(req, res) {
-  const companyId = readActiveCompanyId(res);
-  if (companyId == null) return;
+  const ctx = readCompanyContext(req, res);
+  if (!ctx) return;
+  const companyId = ctx.companyId;
 
   const id = Number(req.params.id);
   const name = req.body?.name;
@@ -142,8 +145,9 @@ async function updateRegion(req, res) {
 }
 
 async function deleteRegion(req, res) {
-  const companyId = readActiveCompanyId(res);
-  if (companyId == null) return;
+  const ctx = readCompanyContext(req, res);
+  if (!ctx) return;
+  const companyId = ctx.companyId;
 
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) {
@@ -188,8 +192,9 @@ async function deleteRegion(req, res) {
 }
 
 async function listPortfolios(req, res) {
-  const companyId = readActiveCompanyId(res);
-  if (companyId == null) return;
+  const ctx = readCompanyContext(req, res);
+  if (!ctx) return;
+  const companyId = ctx.companyId;
 
   const regionId = Number(req.query.regionId);
   if (!Number.isInteger(regionId) || regionId <= 0) {
@@ -206,8 +211,9 @@ async function listPortfolios(req, res) {
 }
 
 async function createPortfolio(req, res) {
-  const companyId = readActiveCompanyId(res);
-  if (companyId == null) return;
+  const ctx = readCompanyContext(req, res);
+  if (!ctx) return;
+  const companyId = ctx.companyId;
 
   const regionId = Number(req.body?.regionId);
   const name = req.body?.name;
@@ -233,8 +239,9 @@ async function createPortfolio(req, res) {
 }
 
 async function updatePortfolio(req, res) {
-  const companyId = readActiveCompanyId(res);
-  if (companyId == null) return;
+  const ctx = readCompanyContext(req, res);
+  if (!ctx) return;
+  const companyId = ctx.companyId;
 
   const id = Number(req.params.id);
   const regionId = req.body?.regionId != null ? Number(req.body.regionId) : undefined;
@@ -277,8 +284,9 @@ async function updatePortfolio(req, res) {
 }
 
 async function deletePortfolio(req, res) {
-  const companyId = readActiveCompanyId(res);
-  if (companyId == null) return;
+  const ctx = readCompanyContext(req, res);
+  if (!ctx) return;
+  const companyId = ctx.companyId;
 
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) {
@@ -319,8 +327,9 @@ async function deletePortfolio(req, res) {
 }
 
 async function listProperties(req, res) {
-  const companyId = readActiveCompanyId(res);
-  if (companyId == null) return;
+  const ctx = readCompanyContext(req, res);
+  if (!ctx) return;
+  const companyId = ctx.companyId;
 
   const portfolioId = Number(req.query.portfolioId);
   if (!Number.isInteger(portfolioId) || portfolioId <= 0) {
@@ -337,8 +346,9 @@ async function listProperties(req, res) {
 }
 
 async function createProperty(req, res) {
-  const companyId = readActiveCompanyId(res);
-  if (companyId == null) return;
+  const ctx = readCompanyContext(req, res);
+  if (!ctx) return;
+  const companyId = ctx.companyId;
 
   const portfolioId = Number(req.body?.portfolioId);
   const name = req.body?.name;
@@ -370,8 +380,9 @@ async function createProperty(req, res) {
 }
 
 async function updateProperty(req, res) {
-  const companyId = readActiveCompanyId(res);
-  if (companyId == null) return;
+  const ctx = readCompanyContext(req, res);
+  if (!ctx) return;
+  const companyId = ctx.companyId;
 
   const id = Number(req.params.id);
   const portfolioId =
@@ -425,8 +436,9 @@ async function updateProperty(req, res) {
 }
 
 async function deleteProperty(req, res) {
-  const companyId = readActiveCompanyId(res);
-  if (companyId == null) return;
+  const ctx = readCompanyContext(req, res);
+  if (!ctx) return;
+  const companyId = ctx.companyId;
 
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) {
@@ -540,8 +552,9 @@ function rowCompanySettings(r, companyId) {
 }
 
 async function getCompanySettings(req, res) {
-  const companyId = readActiveCompanyId(res);
-  if (companyId == null) return;
+  const ctx = readCompanyContext(req, res);
+  if (!ctx) return;
+  const companyId = ctx.companyId;
 
   const result = await query(
     `SELECT CompanyId, FollowupAmount, FollowupDays, FollowupMonths,
@@ -580,8 +593,9 @@ function nullableStringFromBody(v, maxLen) {
 }
 
 async function putCompanySettings(req, res) {
-  const companyId = readActiveCompanyId(res);
-  if (companyId == null) return;
+  const ctx = readCompanyContext(req, res);
+  if (!ctx) return;
+  const companyId = ctx.companyId;
 
   const body = req.body || {};
   for (const k of COMPANY_SETTINGS_KEYS) {
@@ -691,8 +705,9 @@ async function putCompanySettings(req, res) {
 }
 
 async function getUnitDetailColumnPrefs(req, res) {
-  const companyId = readActiveCompanyId(res);
-  if (companyId == null) return;
+  const ctx = readCompanyContext(req, res);
+  if (!ctx) return;
+  const companyId = ctx.companyId;
 
   try {
     const result = await query(
@@ -723,8 +738,9 @@ async function getUnitDetailColumnPrefs(req, res) {
 }
 
 async function putUnitDetailColumnPrefs(req, res) {
-  const companyId = readActiveCompanyId(res);
-  if (companyId == null) return;
+  const ctx = readCompanyContext(req, res);
+  if (!ctx) return;
+  const companyId = ctx.companyId;
 
   const normalized = normalizeUnitDetailColumnPrefs(req.body || {});
   const json = JSON.stringify({
@@ -767,8 +783,9 @@ async function putUnitDetailColumnPrefs(req, res) {
 }
 
 async function listPropertyListNames(req, res) {
-  const companyId = readActiveCompanyId(res);
-  if (companyId == null) return;
+  const ctx = readCompanyContext(req, res);
+  if (!ctx) return;
+  const companyId = ctx.companyId;
 
   const result = await query(
     `SELECT DISTINCT LTRIM(RTRIM(ListName)) AS value
@@ -783,6 +800,119 @@ async function listPropertyListNames(req, res) {
   const presets = ["List1", "List2", "List3"];
   const merged = [...new Set([...presets, ...fromDb])];
   res.json({ listNames: merged });
+}
+
+function rowReminderEmailLog(r) {
+  const sent = r.SentAt ?? r.sentAt;
+  return {
+    id: r.Id ?? r.id,
+    companyId: r.CompanyId ?? r.companyId,
+    senderMailbox: r.SenderMailbox ?? r.senderMailbox ?? "",
+    toEmail: r.ToEmail ?? r.toEmail ?? "",
+    subject: r.Subject ?? r.subject ?? "",
+    sentAt: sent instanceof Date ? sent.toISOString() : sent != null ? String(sent) : null,
+    graphMessageId: r.GraphMessageId ?? r.graphMessageId ?? "",
+    graphConversationId: r.GraphConversationId ?? r.graphConversationId ?? "",
+    tenantLabel: r.TenantLabel ?? r.tenantLabel ?? "",
+    propertyName: r.PropertyName ?? r.propertyName ?? "",
+    bodyPreview: r.BodyPreview ?? r.bodyPreview ?? ""
+  };
+}
+
+async function listReminderEmailLog(req, res) {
+  const ctx = readCompanyContext(req, res);
+  if (!ctx) return;
+  const companyId = ctx.companyId;
+
+  try {
+    const result = await query(
+      `SELECT TOP 200
+         Id, CompanyId, SenderMailbox, ToEmail, Subject, SentAt,
+         GraphMessageId, GraphConversationId, TenantLabel, PropertyName, BodyPreview
+       FROM dbo.ReminderEmailLog
+       WHERE CompanyId = @companyId
+       ORDER BY SentAt DESC`,
+      { companyId: { type: sql.Int, value: companyId } }
+    );
+    res.json({ entries: result.recordset.map(rowReminderEmailLog) });
+  } catch (err) {
+    if (/Invalid object name/i.test(String(err?.message || ""))) {
+      return res.status(503).json({
+        error:
+          "ReminderEmailLog table is missing. Run backend/scripts/migrate-reminder-email-log.sql on the database."
+      });
+    }
+    throw err;
+  }
+}
+
+async function postReminderEmailLog(req, res) {
+  const ctx = readCompanyContext(req, res);
+  if (!ctx) return;
+  const companyId = ctx.companyId;
+
+  const b = req.body || {};
+  const senderMailbox = String(b.senderMailbox || "").trim();
+  const toEmail = String(b.toEmail || "").trim();
+  const graphMessageId = String(b.graphMessageId || "").trim();
+  const graphConversationId = String(b.graphConversationId || "").trim().slice(0, 450);
+  if (!senderMailbox) {
+    return res.status(400).json({ error: "senderMailbox is required" });
+  }
+  if (!toEmail) {
+    return res.status(400).json({ error: "toEmail is required" });
+  }
+  if (!graphMessageId) {
+    return res.status(400).json({ error: "graphMessageId is required" });
+  }
+
+  const subject = b.subject != null ? String(b.subject).trim().slice(0, 500) : null;
+  const tenantLabel = b.tenantLabel != null ? String(b.tenantLabel).trim().slice(0, 500) : null;
+  const propertyName = b.propertyName != null ? String(b.propertyName).trim().slice(0, 500) : null;
+  const bodyPreview = b.bodyPreview != null ? String(b.bodyPreview).trim().slice(0, 2000) : null;
+
+  let sentAtParam = null;
+  if (b.sentAt != null && String(b.sentAt).trim() !== "") {
+    const d = new Date(String(b.sentAt));
+    if (!Number.isNaN(d.getTime())) sentAtParam = d;
+  }
+
+  try {
+    const result = await query(
+      `INSERT INTO dbo.ReminderEmailLog (
+         CompanyId, SenderMailbox, ToEmail, Subject, SentAt,
+         GraphMessageId, GraphConversationId, TenantLabel, PropertyName, BodyPreview
+       )
+       OUTPUT INSERTED.Id, INSERTED.CompanyId, INSERTED.SenderMailbox, INSERTED.ToEmail, INSERTED.Subject,
+              INSERTED.SentAt, INSERTED.GraphMessageId, INSERTED.GraphConversationId,
+              INSERTED.TenantLabel, INSERTED.PropertyName, INSERTED.BodyPreview
+       VALUES (
+         @companyId, @senderMailbox, @toEmail, @subject, ISNULL(@sentAt, SYSUTCDATETIME()),
+         @graphMessageId, @graphConversationId, @tenantLabel, @propertyName, @bodyPreview
+       )`,
+      {
+        companyId: { type: sql.Int, value: companyId },
+        senderMailbox: { type: sql.NVarChar(320), value: senderMailbox },
+        toEmail: { type: sql.NVarChar(320), value: toEmail },
+        subject: { type: sql.NVarChar(500), value: subject },
+        sentAt: { type: sql.DateTime2, value: sentAtParam },
+        graphMessageId: { type: sql.NVarChar(450), value: graphMessageId },
+        graphConversationId: { type: sql.NVarChar(450), value: graphConversationId },
+        tenantLabel: { type: sql.NVarChar(500), value: tenantLabel },
+        propertyName: { type: sql.NVarChar(500), value: propertyName },
+        bodyPreview: { type: sql.NVarChar(2000), value: bodyPreview }
+      }
+    );
+    res.status(201).json({ entry: rowReminderEmailLog(result.recordset[0]) });
+  } catch (err) {
+    if (/Invalid object name/i.test(String(err?.message || ""))) {
+      return res.status(503).json({
+        error:
+          "ReminderEmailLog table is missing. Run backend/scripts/migrate-reminder-email-log.sql on the database."
+      });
+    }
+    throw err;
+  }
 }
 
 module.exports = {
@@ -802,5 +932,7 @@ module.exports = {
   putCompanySettings,
   getUnitDetailColumnPrefs,
   putUnitDetailColumnPrefs,
-  listPropertyListNames
+  listPropertyListNames,
+  listReminderEmailLog,
+  postReminderEmailLog
 };

@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { ArrowLeft, X } from "lucide-react";
+import { ArrowLeft, Columns3, X } from "lucide-react";
 import { api } from "../api/apiClient";
 import { normalizeUnitDetailColumnPrefs } from "../constants/unitDetailColumns.js";
 import { getActiveCompanyId } from "../config/company.js";
 import Spinner from "../components/Spinner";
 import UnitDetailsTable from "../components/UnitDetailsTable";
+import UnitDetailColumnPrefsModal from "../components/UnitDetailColumnPrefsModal";
 import PropertyMultiSelect from "../components/PropertyMultiSelect";
 
 const ALERT_KEYS = new Set([
@@ -24,6 +25,17 @@ const DELINQ_KEYS = new Set([
 ]);
 
 const SLICE_KEYS = ["collection", "alert", "delinq", "occupied"];
+
+function buildEmailPreviewContextFromSettings(s) {
+  const cd = s?.companyDisplayName != null ? String(s.companyDisplayName).trim() : "";
+  const parts = cd.split(/\s+/).filter(Boolean);
+  return {
+    companyDisplayName: cd,
+    senderName: parts[0] || "Team",
+    replyEmail: String(import.meta.env.VITE_AR_CONTACT_EMAIL ?? "").trim(),
+    senderPhone: String(import.meta.env.VITE_AR_CONTACT_PHONE ?? "").trim()
+  };
+}
 
 const SLICE_CHIP_LABELS = {
   occupied: "Slice: Occupied",
@@ -44,6 +56,14 @@ const SLICE_CHIP_LABELS = {
 function dedupeOrdered(names) {
   const seen = new Set();
   return names.filter((p) => (seen.has(p) ? false : (seen.add(p), true)));
+}
+
+function parseLegalPresets(raw) {
+  if (raw == null || !String(raw).trim()) return [];
+  return String(raw)
+    .split(/[,;]/)
+    .map((x) => x.trim())
+    .filter(Boolean);
 }
 
 export default function PropertyDetails() {
@@ -97,6 +117,10 @@ export default function PropertyDetails() {
   const [propertyDropdownOpen, setPropertyDropdownOpen] = useState(false);
   const [erpStaticLink, setErpStaticLink] = useState("");
   const [unitDetailColumnPrefs, setUnitDetailColumnPrefs] = useState(() => normalizeUnitDetailColumnPrefs({}));
+  const [unitDetailPrefsOpen, setUnitDetailPrefsOpen] = useState(false);
+  const [emailPreviewContext, setEmailPreviewContext] = useState(() => buildEmailPreviewContextFromSettings({}));
+  const [legalPresets, setLegalPresets] = useState([]);
+  const [unitsRefreshTick, setUnitsRefreshTick] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -129,6 +153,8 @@ export default function PropertyDetails() {
         if (!cancelled && s) {
           const link = s.erpStaticLink ?? s.ErpStaticLink;
           setErpStaticLink(link != null ? String(link) : "");
+          setEmailPreviewContext(buildEmailPreviewContextFromSettings(s));
+          setLegalPresets(parseLegalPresets(s.defaultLegalStatusList ?? s.DefaultLegalStatusList));
         }
       } catch {
         /* optional */
@@ -137,6 +163,7 @@ export default function PropertyDetails() {
     function onCompanySettingsUpdated(e) {
       const s = e.detail;
       if (s?.erpStaticLink !== undefined) setErpStaticLink(s.erpStaticLink ?? "");
+      if (s) setEmailPreviewContext(buildEmailPreviewContextFromSettings(s));
     }
     window.addEventListener("ct:company-settings-updated", onCompanySettingsUpdated);
     return () => {
@@ -233,7 +260,8 @@ export default function PropertyDetails() {
     collectionFilter,
     alertFilter,
     delinqFilter,
-    occupiedOnly
+    occupiedOnly,
+    unitsRefreshTick
   ]);
 
   const legalOptions = useMemo(() => {
@@ -243,6 +271,29 @@ export default function PropertyDetails() {
     }
     return [...s].sort((a, b) => String(a).localeCompare(String(b)));
   }, [units]);
+
+  const legalStatusChoices = useMemo(() => {
+    const s = new Set();
+    for (const x of legalPresets) {
+      if (x) s.add(String(x).trim());
+    }
+    for (const x of legalOptions) {
+      if (x) s.add(String(x).trim());
+    }
+    return [...s].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  }, [legalPresets, legalOptions]);
+
+  const unitsGroupedByProperty = useMemo(() => {
+    return selectedProperties.map((p) => {
+      const name = String(p).trim();
+      const rows = units.filter((u) => String(u.property ?? "").trim() === name);
+      const totalBalance = rows.reduce((acc, u) => {
+        const n = Number(u.balance);
+        return acc + (Number.isFinite(n) ? n : 0);
+      }, 0);
+      return { property: name, rows, totalBalance };
+    });
+  }, [units, selectedProperties]);
 
   const dashboardSliceValue = useMemo(() => {
     if (collectionFilter === "lt1" || collectionFilter === "ge1") return collectionFilter;
@@ -467,39 +518,58 @@ export default function PropertyDetails() {
             </div>
           )}
 
-          {selectedProperties.length > 0 && (
-            <div className="unit-details-rowcount" role="status">
-              {loadingUnits ? (
-                <span className="text-muted">Loading row count…</span>
-              ) : (
-                <>
-                  <span className="unit-details-rowcount-value">{units.length}</span>
-                  <span className="text-muted">
-                    {" "}
-                    row{units.length === 1 ? "" : "s"} (
-                    {selectedProperties.length === 1
-                      ? "1 property"
-                      : `${selectedProperties.length} properties`}
-                    )
-                  </span>
-                </>
-              )}
-            </div>
-          )}
-
           <div className="card-body" style={{ padding: 0 }}>
             {loadingSummary ? (
               <Spinner />
             ) : selectedProperties.length === 0 ? null : loadingUnits ? (
               <Spinner />
             ) : (
-              <UnitDetailsTable
-                units={units}
-                erpStaticLink={erpStaticLink}
-                companyId={companyId}
-                columnPrefs={unitDetailColumnPrefs}
-                onColumnPrefsSaved={setUnitDetailColumnPrefs}
-              />
+              <div className="property-detail-units-stack">
+                <div className="unit-detail-table-toolbar unit-detail-table-toolbar--stack">
+                  <button
+                    type="button"
+                    className="unit-detail-columns-btn"
+                    onClick={() => setUnitDetailPrefsOpen(true)}
+                    title="Choose which columns to show and their order"
+                  >
+                    <span className="unit-detail-columns-btn__icon" aria-hidden>
+                      <Columns3 size={17} strokeWidth={2.25} />
+                    </span>
+                    <span className="unit-detail-columns-btn__text">Columns</span>
+                  </button>
+                </div>
+                <UnitDetailColumnPrefsModal
+                  open={unitDetailPrefsOpen}
+                  companyId={companyId}
+                  initialPrefs={unitDetailColumnPrefs}
+                  onClose={() => setUnitDetailPrefsOpen(false)}
+                  onSaved={(next) => {
+                    setUnitDetailColumnPrefs(
+                      normalizeUnitDetailColumnPrefs({
+                        columnOrder: next.columnOrder,
+                        hidden: next.hidden
+                      })
+                    );
+                    setUnitDetailPrefsOpen(false);
+                  }}
+                />
+                {unitsGroupedByProperty.map((g) => (
+                  <section key={g.property} className="property-detail-unit-block">
+                    <UnitDetailsTable
+                      units={g.rows}
+                      erpStaticLink={erpStaticLink}
+                      companyId={companyId}
+                      columnPrefs={unitDetailColumnPrefs}
+                      onColumnPrefsSaved={setUnitDetailColumnPrefs}
+                      showColumnsControl={false}
+                      blockCaption={{ propertyName: g.property, totalBalance: g.totalBalance }}
+                      emailPreviewContext={emailPreviewContext}
+                      legalStatusChoices={legalStatusChoices}
+                      onUnitsRefresh={() => setUnitsRefreshTick((x) => x + 1)}
+                    />
+                  </section>
+                ))}
+              </div>
             )}
           </div>
         </div>

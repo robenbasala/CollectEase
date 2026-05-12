@@ -1,6 +1,8 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, ArrowUpDown, Columns3, ExternalLink, Mail } from "lucide-react";
 import UnitDetailColumnPrefsModal from "./UnitDetailColumnPrefsModal";
+import PaymentReminderEmailModal from "./PaymentReminderEmailModal";
+import UnitDetailRowModal from "./UnitDetailRowModal";
 import {
   normalizeUnitDetailColumnPrefs,
   UNIT_DETAIL_COLUMN_LABELS
@@ -112,6 +114,16 @@ function tieBreakKey(u) {
   return `${u.property ?? ""}\t${u.unit ?? ""}\t${u.name ?? ""}`;
 }
 
+function sameDetailRow(a, b) {
+  if (!a || !b) return false;
+  return (
+    String(a.property ?? "").trim() === String(b.property ?? "").trim() &&
+    String(a.unit ?? "").trim() === String(b.unit ?? "").trim() &&
+    String(a.name ?? "").trim() === String(b.name ?? "").trim() &&
+    tenantCodeValue(a) === tenantCodeValue(b)
+  );
+}
+
 function SortHeaderButton({ label, colKey, active, dir, onSort }) {
   return (
     <button
@@ -136,7 +148,7 @@ function SortHeaderButton({ label, colKey, active, dir, onSort }) {
   );
 }
 
-function renderBodyCells(u, visibleOrder, baseLink) {
+function renderBodyCells(u, visibleOrder, baseLink, openPaymentReminder, reminderReplyFallback) {
   const parts = [];
   for (const key of visibleOrder) {
     switch (key) {
@@ -191,22 +203,55 @@ function renderBodyCells(u, visibleOrder, baseLink) {
         parts.push(<td key="ph">{phoneValue(u) || "—"}</td>);
         break;
       case "email":
-        parts.push(<td key="em">{u.email ?? "—"}</td>);
+        parts.push(
+          <td key="em">
+            {u.email ? (
+              <button
+                type="button"
+                className="unit-detail-email-trigger"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openPaymentReminder(u);
+                }}
+              >
+                {u.email}
+              </button>
+            ) : reminderReplyFallback ? (
+              <button
+                type="button"
+                className="unit-detail-email-trigger"
+                title={`No tenant email — send to company contact (${reminderReplyFallback})`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openPaymentReminder(u);
+                }}
+              >
+                Company contact
+              </button>
+            ) : (
+              "—"
+            )}
+          </td>
+        );
         break;
       case "actions": {
         const erpHref = buildTenantDeepLink(baseLink, tenantCodeValue(u));
         parts.push(
           <td key="ac">
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              {u.email && (
-                <a
+              {(u.email || reminderReplyFallback) && (
+                <button
+                  type="button"
                   className="btn-icon"
-                  href={`mailto:${u.email}`}
-                  title="Email"
-                  onClick={(e) => e.stopPropagation()}
+                  title="Payment reminder preview"
+                  aria-label="Payment reminder preview"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openPaymentReminder(u);
+                  }}
                 >
                   <Mail size={16} />
-                </a>
+                </button>
               )}
               {erpHref ? (
                 <a
@@ -245,9 +290,44 @@ function renderBodyCells(u, visibleOrder, baseLink) {
   return parts;
 }
 
-export default function UnitDetailsTable({ units, erpStaticLink, companyId, columnPrefs, onColumnPrefsSaved }) {
+export default function UnitDetailsTable({
+  units,
+  erpStaticLink,
+  companyId,
+  columnPrefs,
+  onColumnPrefsSaved,
+  showColumnsControl = true,
+  blockCaption = null,
+  emailPreviewContext = null,
+  legalStatusChoices = [],
+  onUnitsRefresh
+}) {
   const [sort, setSort] = useState({ key: null, dir: "asc" });
   const [prefsOpen, setPrefsOpen] = useState(false);
+  const [paymentReminderUnit, setPaymentReminderUnit] = useState(null);
+  const [detailModalUnit, setDetailModalUnit] = useState(null);
+
+  useEffect(() => {
+    setDetailModalUnit((cur) => {
+      if (!cur) return cur;
+      const next = units.find((u) => sameDetailRow(u, cur));
+      return next ?? cur;
+    });
+  }, [units]);
+
+  const reminderReplyFallback = emailPreviewContext?.replyEmail
+    ? String(emailPreviewContext.replyEmail).trim()
+    : "";
+
+  function openPaymentReminder(u) {
+    const tenant = u?.email ? String(u.email).trim() : "";
+    if (tenant || reminderReplyFallback) setPaymentReminderUnit(u);
+  }
+
+  function handleDataRowClick(e, u) {
+    if (e.target.closest("a,button,input,select,textarea,label")) return;
+    setDetailModalUnit(u);
+  }
 
   const visibleOrder = useMemo(() => {
     const { columnOrder, hidden } = normalizeUnitDetailColumnPrefs(columnPrefs ?? {});
@@ -340,17 +420,50 @@ export default function UnitDetailsTable({ units, erpStaticLink, companyId, colu
   }
 
   if (!units.length) {
-    return <div className="empty-state">No units match the current filters.</div>;
+    return (
+      <Fragment>
+        {blockCaption ? (
+          <div className="property-detail-unit-block__head">
+            <h3 className="property-detail-unit-block__title">{blockCaption.propertyName}</h3>
+            <div className="property-detail-unit-block__meta">
+              <span className="property-detail-unit-block__total money">
+                Total balance: {formatMoney(blockCaption.totalBalance)}
+              </span>
+            </div>
+          </div>
+        ) : null}
+        <div className="empty-state">No units match the current filters.</div>
+      </Fragment>
+    );
   }
 
   return (
     <Fragment>
-      <div className="unit-detail-table-toolbar">
-        <button type="button" className="btn btn-ghost unit-detail-columns-btn" onClick={() => setPrefsOpen(true)}>
-          <Columns3 size={18} strokeWidth={2} aria-hidden />
-          Columns
-        </button>
-      </div>
+      {blockCaption ? (
+        <div className="property-detail-unit-block__head">
+          <h3 className="property-detail-unit-block__title">{blockCaption.propertyName}</h3>
+          <div className="property-detail-unit-block__meta">
+            <span className="property-detail-unit-block__total money">
+              Total balance: {formatMoney(blockCaption.totalBalance)}
+            </span>
+          </div>
+        </div>
+      ) : null}
+      {showColumnsControl ? (
+        <div className="unit-detail-table-toolbar">
+          <button
+            type="button"
+            className="unit-detail-columns-btn"
+            onClick={() => setPrefsOpen(true)}
+            title="Choose which columns to show and their order"
+          >
+            <span className="unit-detail-columns-btn__icon" aria-hidden>
+              <Columns3 size={17} strokeWidth={2.25} />
+            </span>
+            <span className="unit-detail-columns-btn__text">Columns</span>
+          </button>
+        </div>
+      ) : null}
       <div className="table-wrap table-wrap--report">
         <table className="data-table data-table-unit-detail">
           <thead>
@@ -368,20 +481,46 @@ export default function UnitDetailsTable({ units, erpStaticLink, companyId, colu
                     ? "No tenant code on this row"
                     : undefined;
               return (
-                <tr key={`${u.property ?? ""}-${u.unit}-${u.name}-${idx}`} title={rowTooltip}>
-                  {renderBodyCells(u, visibleOrder, baseLink)}
+                <tr
+                  key={`${u.property ?? ""}-${u.unit}-${u.name}-${idx}`}
+                  className="unit-detail-data-row"
+                  title={rowTooltip ? `${rowTooltip} — Click row for details` : "Click row for details"}
+                  onClick={(e) => handleDataRowClick(e, u)}
+                >
+                  {renderBodyCells(u, visibleOrder, baseLink, openPaymentReminder, reminderReplyFallback)}
                 </tr>
               );
             })}
           </tbody>
         </table>
       </div>
-      <UnitDetailColumnPrefsModal
-        open={prefsOpen}
-        companyId={companyId}
-        initialPrefs={columnPrefs ?? {}}
-        onClose={() => setPrefsOpen(false)}
-        onSaved={(next) => onColumnPrefsSaved?.(next)}
+      {showColumnsControl ? (
+        <UnitDetailColumnPrefsModal
+          open={prefsOpen}
+          companyId={companyId}
+          initialPrefs={columnPrefs ?? {}}
+          onClose={() => setPrefsOpen(false)}
+          onSaved={(next) => onColumnPrefsSaved?.(next)}
+        />
+      ) : null}
+      <UnitDetailRowModal
+        open={Boolean(detailModalUnit)}
+        unit={detailModalUnit}
+        onClose={() => setDetailModalUnit(null)}
+        legalStatusChoices={legalStatusChoices}
+        erpStaticLink={baseLink}
+        emailPreviewContext={emailPreviewContext}
+        onOpenPaymentReminder={(u) => {
+          setDetailModalUnit(null);
+          openPaymentReminder(u);
+        }}
+        onUnitsRefresh={onUnitsRefresh}
+      />
+      <PaymentReminderEmailModal
+        open={Boolean(paymentReminderUnit)}
+        unit={paymentReminderUnit}
+        context={emailPreviewContext ?? {}}
+        onClose={() => setPaymentReminderUnit(null)}
       />
     </Fragment>
   );
