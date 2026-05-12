@@ -4,6 +4,8 @@ import { Trash2, X } from "lucide-react";
 import { api } from "../api/apiClient";
 import AdminPanel from "../components/AdminPanel";
 import AdminUsersPanel from "../components/AdminUsersPanel";
+import PageHeader from "../components/PageHeader";
+import PropertyLegalStatusOptionsCard from "../components/PropertyLegalStatusOptionsCard";
 import Spinner from "../components/Spinner";
 import { useAuth } from "../context/AuthContext.jsx";
 
@@ -84,6 +86,7 @@ export default function AdminPage() {
   const [regions, setRegions] = useState([]);
   const [portfolios, setPortfolios] = useState([]);
   const [properties, setProperties] = useState([]);
+  const [propertyListNames, setPropertyListNames] = useState([]);
 
   const [regionId, setRegionId] = useState(null);
   const [portfolioId, setPortfolioId] = useState(null);
@@ -114,13 +117,18 @@ export default function AdminPage() {
     setProperties(data.properties || []);
   }, []);
 
+  const loadPropertyListNames = useCallback(async () => {
+    const data = await api.getAdminPropertyListNames();
+    setPropertyListNames(data.listNames || []);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setLoading(true);
       setError("");
       try {
-        await loadRegions();
+        await Promise.all([loadRegions(), loadPropertyListNames()]);
       } catch (e) {
         if (!cancelled) setError(e.message || "Failed to load admin data");
       } finally {
@@ -130,7 +138,7 @@ export default function AdminPage() {
     return () => {
       cancelled = true;
     };
-  }, [loadRegions]);
+  }, [loadRegions, loadPropertyListNames]);
 
   useEffect(() => {
     if (!isSuperAdmin) {
@@ -300,8 +308,11 @@ export default function AdminPage() {
 
   return (
     <div className="page">
-      <h1 className="page-title">Admin</h1>
-      <p className="page-sub">Companies, users, and geographic structure for your workspace.</p>
+      <PageHeader
+        title="Admin"
+        subtitle="Companies, users, legal status lists, and geographic structure for your workspace."
+        backTo="/"
+      />
 
       <div className="admin-page-tabs" role="tablist" aria-label="Admin sections">
         {isSuperAdmin ? (
@@ -337,6 +348,16 @@ export default function AdminPage() {
           onClick={() => setActiveTab("structure")}
         >
           Regions, portfolios &amp; properties
+        </button>
+        <button
+          type="button"
+          role="tab"
+          id="admin-tab-legal"
+          aria-selected={activeTab === "legal"}
+          className={`admin-page-tab${activeTab === "legal" ? " admin-page-tab--active" : ""}`}
+          onClick={() => setActiveTab("legal")}
+        >
+          Legal status lists
         </button>
       </div>
 
@@ -520,6 +541,17 @@ export default function AdminPage() {
         </div>
       ) : null}
 
+      {activeTab === "legal" ? (
+        <div
+          className="admin-page-panel"
+          role="tabpanel"
+          aria-labelledby="admin-tab-legal"
+          id="admin-panel-legal"
+        >
+          <PropertyLegalStatusOptionsCard onListsChanged={loadPropertyListNames} />
+        </div>
+      ) : null}
+
       {modal?.type === "region" && (
         <Modal
           title={modal.mode === "create" ? "Add region" : "Edit region"}
@@ -585,8 +617,15 @@ export default function AdminPage() {
             <input id="pfn" value={formName} onChange={(e) => setFormName(e.target.value)} />
           </div>
           <div className="field">
-            <label htmlFor="pln">List name (optional)</label>
-            <input id="pln" value={formListName} onChange={(e) => setFormListName(e.target.value)} />
+            <label htmlFor="pln">Legal status preset list</label>
+            <select id="pln" value={formListName} onChange={(e) => setFormListName(e.target.value)}>
+              <option value="">— Default —</option>
+              {propertyListNames.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
           </div>
         </Modal>
       )}

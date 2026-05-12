@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { ArrowLeft, Columns3, X } from "lucide-react";
+import { Columns3, X } from "lucide-react";
 import { api } from "../api/apiClient";
 import { normalizeUnitDetailColumnPrefs } from "../constants/unitDetailColumns.js";
 import { getActiveCompanyId } from "../config/company.js";
+import PageHeader from "../components/PageHeader";
 import Spinner from "../components/Spinner";
 import UnitDetailsTable from "../components/UnitDetailsTable";
 import UnitDetailColumnPrefsModal from "../components/UnitDetailColumnPrefsModal";
@@ -394,12 +395,7 @@ export default function PropertyDetails() {
 
   return (
     <div className="page">
-      <button type="button" className="btn btn-ghost" onClick={() => navigate(-1)} style={{ marginBottom: "0.75rem" }}>
-        <ArrowLeft size={18} />
-        Back
-      </button>
-
-      <h1 className="page-title">Property details</h1>
+      <PageHeader title="Property details" backTo={-1} />
 
       {!region && (
         <div className="card" style={{ padding: "1rem", marginBottom: "1rem" }}>
@@ -521,7 +517,7 @@ export default function PropertyDetails() {
           <div className="card-body" style={{ padding: 0 }}>
             {loadingSummary ? (
               <Spinner />
-            ) : selectedProperties.length === 0 ? null : loadingUnits ? (
+            ) : selectedProperties.length === 0 ? null : loadingUnits && units.length === 0 ? (
               <Spinner />
             ) : (
               <div className="property-detail-units-stack">
@@ -562,7 +558,7 @@ export default function PropertyDetails() {
                       columnPrefs={unitDetailColumnPrefs}
                       onColumnPrefsSaved={setUnitDetailColumnPrefs}
                       showColumnsControl={false}
-                      blockCaption={{ propertyName: g.property, totalBalance: g.totalBalance }}
+                      blockCaption={{ propertyName: g.property, totalBalance: g.totalBalance, rowCount: g.rows.length }}
                       emailPreviewContext={emailPreviewContext}
                       legalStatusChoices={legalStatusChoices}
                       onUnitsRefresh={() => setUnitsRefreshTick((x) => x + 1)}

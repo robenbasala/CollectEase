@@ -8,13 +8,13 @@ import {
   Pin,
   PinOff,
   RefreshCw,
-  Scale,
   StickyNote,
   Trash2,
   X
 } from "lucide-react";
 import { api } from "../api/apiClient";
 import { getActiveMsAccount } from "../microsoft/msGraphMail";
+import UnitLegalCasesPanel from "./UnitLegalCasesPanel";
 
 function tenantCodeFromUnit(u) {
   if (!u || typeof u !== "object") return "";
@@ -74,18 +74,14 @@ export default function UnitDetailRowModal({
   open,
   unit,
   onClose,
-  legalStatusChoices,
   erpStaticLink,
   emailPreviewContext,
   onOpenPaymentReminder,
   onUnitsRefresh
 }) {
   const [nextFollowInput, setNextFollowInput] = useState("");
-  const [legalSelect, setLegalSelect] = useState("");
   const [savingFollow, setSavingFollow] = useState(false);
-  const [savingLegal, setSavingLegal] = useState(false);
   const [err, setErr] = useState("");
-  const [legalHistory, setLegalHistory] = useState([]);
   const [notes, setNotes] = useState([]);
   const [noteDraft, setNoteDraft] = useState("");
   const [savingNote, setSavingNote] = useState(false);
@@ -109,24 +105,20 @@ export default function UnitDetailRowModal({
     };
   }, [unit, tc]);
 
-  const loadNotesAndHistory = useCallback(async () => {
+  const loadNotes = useCallback(async () => {
     if (!rowQuery?.property) return;
     setLoadingSide(true);
     setErr("");
     try {
-      const [n, h] = await Promise.all([
-        api.getDashboardUnitNotes(rowQuery),
-        api.getDashboardUnitLegalHistory(rowQuery)
-      ]);
+      const n = await api.getDashboardUnitNotes(rowQuery);
       setNotes(
         (Array.isArray(n.notes) ? n.notes : []).map((x) => ({
           ...x,
           noteSource: noteSourceOf(x)
         }))
       );
-      setLegalHistory(Array.isArray(h.entries) ? h.entries : []);
     } catch (e) {
-      setErr(e.message || "Failed to load notes/history");
+      setErr(e.message || "Failed to load notes");
     } finally {
       setLoadingSide(false);
     }
@@ -143,23 +135,13 @@ export default function UnitDetailRowModal({
       return;
     }
     setNextFollowInput(toDateInputValue(unit.nextFollowUp));
-    setLegalSelect(String(unit.legalStatus ?? ""));
-    void loadNotesAndHistory();
-  }, [open, unit, loadNotesAndHistory]);
+    void loadNotes();
+  }, [open, unit, loadNotes]);
 
   const filteredNotes = useMemo(() => {
     if (noteFilter === "all") return notes;
     return notes.filter((x) => noteSourceOf(x) === noteFilter);
   }, [notes, noteFilter]);
-
-  const legalOptionsMerged = useMemo(() => {
-    const s = new Set();
-    for (const x of legalStatusChoices || []) {
-      if (x) s.add(String(x).trim());
-    }
-    if (unit?.legalStatus) s.add(String(unit.legalStatus).trim());
-    return [...s].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
-  }, [legalStatusChoices, unit]);
 
   async function saveFollowUp() {
     if (!rowQuery) return;
@@ -176,24 +158,6 @@ export default function UnitDetailRowModal({
       setErr(e.message || "Save failed");
     } finally {
       setSavingFollow(false);
-    }
-  }
-
-  async function saveLegalStatus() {
-    if (!rowQuery) return;
-    setSavingLegal(true);
-    setErr("");
-    try {
-      await api.patchDashboardUnitRow({
-        ...rowQuery,
-        legalStatus: legalSelect || ""
-      });
-      onUnitsRefresh?.();
-      await loadNotesAndHistory();
-    } catch (e) {
-      setErr(e.message || "Save failed");
-    } finally {
-      setSavingLegal(false);
     }
   }
 
@@ -214,7 +178,8 @@ export default function UnitDetailRowModal({
         ...(createdByName ? { createdByName } : {})
       });
       setNoteDraft("");
-      await loadNotesAndHistory();
+      await loadNotes();
+      onUnitsRefresh?.();
     } catch (e) {
       setErr(e.message || "Could not save note");
     } finally {
@@ -430,43 +395,7 @@ export default function UnitDetailRowModal({
           </section>
 
           <section className="ud-row-modal__panel ud-row-modal__panel--legal">
-            <h3 className="ud-row-modal__panel-title">
-              <Scale size={18} aria-hidden />
-              Legal status
-            </h3>
-            <select className="ud-row-modal__select" value={legalSelect} onChange={(e) => setLegalSelect(e.target.value)}>
-              <option value="">— Clear / blank —</option>
-              {legalOptionsMerged.map((ls) => (
-                <option key={ls} value={ls}>
-                  {ls}
-                </option>
-              ))}
-            </select>
-            <button type="button" className="btn btn-primary ud-row-modal__fullbtn" disabled={savingLegal} onClick={() => void saveLegalStatus()}>
-              {savingLegal ? "Saving…" : "Save status"}
-            </button>
-
-            <h4 className="ud-row-modal__subhead">History</h4>
-            <div className="ud-row-modal__scrollbox">
-              {loadingSide ? (
-                <p className="text-muted">Loading…</p>
-              ) : legalHistory.length === 0 ? (
-                <p className="text-muted">No changes logged yet.</p>
-              ) : (
-                <ul className="ud-row-modal__history">
-                  {legalHistory.map((h) => (
-                    <li key={h.id}>
-                      <time>{formatDate(h.changedAt)}</time>
-                      <div className="ud-row-modal__history-change">
-                        <span className="text-muted">{h.oldStatus || "—"}</span>
-                        <span aria-hidden>→</span>
-                        <strong>{h.newStatus}</strong>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
+            <UnitLegalCasesPanel rowQuery={rowQuery} onUnitsRefresh={onUnitsRefresh} />
           </section>
 
           <section className="ud-row-modal__panel ud-row-modal__panel--notes">
@@ -588,6 +517,7 @@ export default function UnitDetailRowModal({
                             ) : (
                               <>
                                 {!isAuto ? (
+                                <>
                                 <button
                                   type="button"
                                   className="ud-row-modal__note-toolbtn ud-row-modal__tool"
@@ -596,7 +526,6 @@ export default function UnitDetailRowModal({
                                 >
                                   <Pencil size={14} strokeWidth={2.25} />
                                 </button>
-                                ) : null}
                                 <button
                                   type="button"
                                   className="ud-row-modal__note-toolbtn ud-row-modal__note-toolbtn--danger ud-row-modal__tool"
@@ -605,6 +534,8 @@ export default function UnitDetailRowModal({
                                 >
                                   <Trash2 size={14} strokeWidth={2.25} />
                                 </button>
+                                </>
+                                ) : null}
                               </>
                             )}
                           </div>

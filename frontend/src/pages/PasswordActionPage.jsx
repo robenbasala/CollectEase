@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { Eye, EyeOff } from "lucide-react";
-import { confirmPasswordReset, verifyPasswordResetCode } from "firebase/auth";
+import { Check, Eye, EyeOff, KeyRound, X } from "lucide-react";
+import { confirmPasswordReset, signInWithEmailAndPassword, verifyPasswordResetCode } from "firebase/auth";
+import { api } from "../api/apiClient";
 import { getFirebaseAuth, isFirebaseConfigured } from "../auth/firebase.js";
 import logoSvg from "../media/Logo.svg";
 
@@ -60,14 +61,29 @@ export default function PasswordActionPage() {
     };
   }, [mode, oobCode]);
 
+  const checks = useMemo(
+    () => ({
+      length: password.length >= 8,
+      letter: /[A-Za-z]/.test(password),
+      digit: /\d/.test(password),
+      match: confirm.length > 0 && password === confirm
+    }),
+    [password, confirm]
+  );
+  const allChecksPass = checks.length && checks.letter && checks.digit && checks.match;
+
   async function onSubmit(e) {
     e.preventDefault();
     setFormError("");
-    if (password.length < 6) {
-      setFormError("Password must be at least 6 characters.");
+    if (!checks.length) {
+      setFormError("Password must be at least 8 characters.");
       return;
     }
-    if (password !== confirm) {
+    if (!checks.letter || !checks.digit) {
+      setFormError("Password should include at least one letter and one number.");
+      return;
+    }
+    if (!checks.match) {
       setFormError("Passwords do not match.");
       return;
     }
@@ -75,9 +91,13 @@ export default function PasswordActionPage() {
     try {
       const auth = getFirebaseAuth();
       await confirmPasswordReset(auth, oobCode, password);
+      if (email) {
+        await signInWithEmailAndPassword(auth, email, password);
+        await api.getAuthMe();
+      }
       setDone(true);
     } catch (err) {
-      setFormError(err?.message || "Could not update password.");
+      setFormError(err?.message || "Could not save your password. Try requesting a new link.");
     } finally {
       setBusy(false);
     }
@@ -106,30 +126,55 @@ export default function PasswordActionPage() {
 
           {done ? (
             <>
-              <h1 className="auth-login__title">Password updated</h1>
-              <p className="auth-login__subtitle">You can sign in with your new password.</p>
-              <Link to="/login" className="auth-login__btn auth-login__btn--primary" style={{ textAlign: "center", textDecoration: "none" }}>
-                Back to sign in
+              <div className="set-password__hero set-password__hero--success" aria-hidden>
+                <Check size={26} strokeWidth={2.5} />
+              </div>
+              <h1 className="auth-login__title">You're all set</h1>
+              <p className="auth-login__subtitle">
+                Your password is saved. You can now sign in to CollectEase with{" "}
+                {email ? <strong style={{ fontWeight: 700 }}>{email}</strong> : "your email"} and the password you
+                just chose.
+              </p>
+              <Link
+                to="/login"
+                className="auth-login__btn auth-login__btn--primary"
+                style={{ textAlign: "center", textDecoration: "none" }}
+              >
+                Continue to sign in
               </Link>
             </>
           ) : invalid && !email ? (
             <>
+              <div className="set-password__hero set-password__hero--error" aria-hidden>
+                <X size={26} strokeWidth={2.5} />
+              </div>
               <h1 className="auth-login__title">Link not valid</h1>
-              <p className="auth-login__subtitle">{verifyError || "Open the reset link from your email, or request a new one."}</p>
-              <Link to="/login" className="auth-login__forgot" style={{ display: "block", textAlign: "center", marginTop: "1rem" }}>
+              <p className="auth-login__subtitle">
+                {verifyError || "Open the link from your invitation email, or ask your admin to send a new one."}
+              </p>
+              <Link
+                to="/login"
+                className="auth-login__forgot"
+                style={{ display: "block", textAlign: "center", marginTop: "1rem" }}
+              >
                 Return to sign in
               </Link>
             </>
           ) : (
             <>
-              <h1 className="auth-login__title">Set new password</h1>
+              <div className="set-password__hero" aria-hidden>
+                <KeyRound size={24} strokeWidth={2} />
+              </div>
+              <span className="set-password__eyebrow">Welcome to CollectEase</span>
+              <h1 className="auth-login__title">Set your password for the first time</h1>
               <p className="auth-login__subtitle">
                 {email ? (
                   <>
-                    Choose a password for <strong style={{ fontWeight: 700 }}>{email}</strong>
+                    Pick the password you'll use to sign in as{" "}
+                    <strong style={{ fontWeight: 700 }}>{email}</strong>. You can change it later from your profile.
                   </>
                 ) : (
-                  "Choose a new password for your account."
+                  "Pick the password you'll use to sign in. You can change it later from your profile."
                 )}
               </p>
 
@@ -144,10 +189,11 @@ export default function PasswordActionPage() {
                       className="auth-field__input auth-field__input--password"
                       type={showPw ? "text" : "password"}
                       autoComplete="new-password"
-                      placeholder="At least 6 characters"
+                      placeholder="Create a password"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       disabled={busy}
+                      aria-describedby="set-password-rules"
                     />
                     <button
                       type="button"
@@ -170,7 +216,7 @@ export default function PasswordActionPage() {
                       className="auth-field__input auth-field__input--password"
                       type={showPw2 ? "text" : "password"}
                       autoComplete="new-password"
-                      placeholder="Repeat password"
+                      placeholder="Type the password again"
                       value={confirm}
                       onChange={(e) => setConfirm(e.target.value)}
                       disabled={busy}
@@ -186,9 +232,41 @@ export default function PasswordActionPage() {
                     </button>
                   </div>
                 </div>
+
+                <ul id="set-password-rules" className="set-password__rules" aria-live="polite">
+                  <li className={`set-password__rule${checks.length ? " is-met" : ""}`}>
+                    <span className="set-password__rule-tick" aria-hidden>
+                      {checks.length ? <Check size={12} strokeWidth={3} /> : null}
+                    </span>
+                    At least 8 characters
+                  </li>
+                  <li className={`set-password__rule${checks.letter ? " is-met" : ""}`}>
+                    <span className="set-password__rule-tick" aria-hidden>
+                      {checks.letter ? <Check size={12} strokeWidth={3} /> : null}
+                    </span>
+                    Includes a letter
+                  </li>
+                  <li className={`set-password__rule${checks.digit ? " is-met" : ""}`}>
+                    <span className="set-password__rule-tick" aria-hidden>
+                      {checks.digit ? <Check size={12} strokeWidth={3} /> : null}
+                    </span>
+                    Includes a number
+                  </li>
+                  <li className={`set-password__rule${checks.match ? " is-met" : ""}`}>
+                    <span className="set-password__rule-tick" aria-hidden>
+                      {checks.match ? <Check size={12} strokeWidth={3} /> : null}
+                    </span>
+                    Both passwords match
+                  </li>
+                </ul>
+
                 {formError ? <p className="auth-login__error">{formError}</p> : null}
-                <button type="submit" className="auth-login__btn auth-login__btn--primary" disabled={busy}>
-                  {busy ? "Saving…" : "Update password"}
+                <button
+                  type="submit"
+                  className="auth-login__btn auth-login__btn--primary set-password__submit"
+                  disabled={busy || !allChecksPass}
+                >
+                  {busy ? "Saving…" : "Save password & sign in"}
                 </button>
               </form>
               <p className="auth-login__forgot-wrap">

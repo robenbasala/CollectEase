@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import { api } from "../api/apiClient";
+import PageHeader from "../components/PageHeader";
 import Spinner from "../components/Spinner";
 import PortfolioSummaryCard from "../components/PortfolioSummaryCard";
 
@@ -36,8 +37,11 @@ export default function Dashboard() {
   if (!selectedRegion) {
     return (
       <div className="page">
-        <h1 className="page-title">Dashboard</h1>
-        <p className="page-sub">Select a region in the navbar to load portfolios and properties.</p>
+        <PageHeader
+          title="Dashboard"
+          subtitle="Select a region in the navbar to load portfolios and properties."
+          showBack={false}
+        />
         <div className="empty-state card" style={{ padding: "2rem" }}>
           Choose a region above to see collection performance by portfolio.
         </div>
@@ -47,7 +51,7 @@ export default function Dashboard() {
 
   return (
     <div className="page">
-      <h1 className="page-title">Dashboard</h1>
+      <PageHeader title="Dashboard" showBack={false} />
 
       {loading && <Spinner />}
       {error && (

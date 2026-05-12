@@ -12,7 +12,6 @@ import {
 } from "lucide-react";
 import { getCompanyDisplayName } from "../config/company.js";
 import { useAuth } from "../context/AuthContext.jsx";
-import { api } from "../api/apiClient.js";
 import MicrosoftAccountConnect from "./MicrosoftAccountConnect";
 
 function initialsFromUser(displayName, email) {
@@ -47,41 +46,13 @@ function displayNameFrom(user, firebaseUser) {
 
 export default function Navbar({ regions, selectedRegion, onSelectRegion, loadingRegions, branding }) {
   const location = useLocation();
-  const {
-    user,
-    isSuperAdmin,
-    canOpenAdmin,
-    effectiveCompanyId,
-    setEffectiveCompanyId,
-    logout,
-    firebaseUser
-  } = useAuth();
+  const { user, canOpenAdmin, logout, firebaseUser } = useAuth();
   const showRegionBar = location.pathname === "/";
   const envLabel = getCompanyDisplayName();
   const companyLabel = (branding?.companyDisplayName && String(branding.companyDisplayName).trim()) || envLabel;
 
-  const [companies, setCompanies] = useState([]);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
-
-  useEffect(() => {
-    if (!isSuperAdmin) {
-      setCompanies([]);
-      return;
-    }
-    let cancelled = false;
-    void (async () => {
-      try {
-        const data = await api.listCompanies();
-        if (!cancelled) setCompanies(data.companies || []);
-      } catch {
-        if (!cancelled) setCompanies([]);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [isSuperAdmin]);
 
   useEffect(() => {
     setMenuOpen(false);
@@ -130,26 +101,6 @@ export default function Navbar({ regions, selectedRegion, onSelectRegion, loadin
         {companyLabel ? (
           <div className="company-bar">
             <span className="company-static-label">{companyLabel}</span>
-          </div>
-        ) : null}
-
-        {isSuperAdmin && companies.length > 0 ? (
-          <div className="navbar-workspace-company field" style={{ margin: 0, minWidth: "12rem" }}>
-            <label className="sr-only" htmlFor="nav-company">
-              Workspace company
-            </label>
-            <select
-              id="nav-company"
-              className="navbar-workspace-select"
-              value={effectiveCompanyId ?? user?.companyId ?? ""}
-              onChange={(e) => setEffectiveCompanyId(Number(e.target.value))}
-            >
-              {companies.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
           </div>
         ) : null}
 

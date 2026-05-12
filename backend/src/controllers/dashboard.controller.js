@@ -649,6 +649,142 @@ async function getUnits(req, res) {
     }
   }
 
+  /** Overlay: each row's legalStatus is replaced with the latest status from the latest OPEN
+   *  legal case for that tenant identity. Rows with no open case have legalStatus cleared so the
+   *  column reflects the case-management state, not stale legacy DataTbl values.
+   *  Silently skipped when the new tables don't exist. */
+  if (units.length > 0) {
+    try {
+      const overlayInputs = { companyId: { type: sql.Int, value: companyId } };
+      allowed.forEach((name, i) => {
+        overlayInputs[`overlayProp${i}`] = { type: sql.NVarChar(400), value: name };
+      });
+      const overlayPlaceholders = allowed.map((_, i) => `@overlayProp${i}`).join(", ");
+      const overlayRes = await query(
+        `SELECT PropertyName, Unit, TenantName, LatestStatus
+         FROM (
+           SELECT lc.PropertyName, lc.Unit, lc.TenantName, lcs.Status AS LatestStatus,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY lc.PropertyName, lc.Unit, lc.TenantName
+                    ORDER BY lc.CreatedAt DESC, lc.Id DESC
+                  ) AS rn
+           FROM dbo.UnitLegalCase lc
+           OUTER APPLY (
+             SELECT TOP 1 Status FROM dbo.UnitLegalCaseStatus
+             WHERE CaseId = lc.Id ORDER BY ChangedAt DESC, Id DESC
+           ) lcs
+           WHERE lc.CompanyId = @companyId
+             AND lc.IsClosed = 0
+             AND lc.PropertyName IN (${overlayPlaceholders})
+         ) a
+         WHERE a.rn = 1`,
+        overlayInputs
+      );
+      const key = (p, u, n) =>
+        `${String(p ?? "").trim().toLowerCase()}|${String(u ?? "").trim().toLowerCase()}|${String(n ?? "").trim().toLowerCase()}`;
+      const overlayMap = new Map();
+      for (const r of overlayRes.recordset || []) {
+        const k = key(r.PropertyName, r.Unit, r.TenantName);
+        const ls = r.LatestStatus == null ? "" : String(r.LatestStatus).trim();
+        overlayMap.set(k, ls);
+      }
+      for (const u of units) {
+        const k = key(u.property, u.unit, u.name);
+        u.legalStatus = overlayMap.has(k) ? overlayMap.get(k) : "";
+      }
+    } catch (e) {
+      if (!/Invalid object name/i.test(String(e?.message || ""))) throw e;
+      /* tables not yet migrated; just keep the legacy legalStatus values */
+    }
+  }
+
+  /** Overlay: each row's `nextFollowUp` is the soonest (MIN) FollowUpAt across the tenant's OPEN
+   *  legal cases. Rows with no open case (or with cases that have no follow-up date) fall back to
+   *  the legacy DataTbl nextFollowUp value so existing reminders don't disappear after migration. */
+  if (units.length > 0) {
+    try {
+      const fuInputs = { companyId: { type: sql.Int, value: companyId } };
+      allowed.forEach((name, i) => {
+        fuInputs[`fuProp${i}`] = { type: sql.NVarChar(400), value: name };
+      });
+      const fuPlaceholders = allowed.map((_, i) => `@fuProp${i}`).join(", ");
+      const fuRes = await query(
+        `SELECT PropertyName, Unit, TenantName, MIN(FollowUpAt) AS NextFollowUp
+         FROM dbo.UnitLegalCase
+         WHERE CompanyId = @companyId
+           AND IsClosed = 0
+           AND FollowUpAt IS NOT NULL
+           AND PropertyName IN (${fuPlaceholders})
+         GROUP BY PropertyName, Unit, TenantName`,
+        fuInputs
+      );
+      const key = (p, u, n) =>
+        `${String(p ?? "").trim().toLowerCase()}|${String(u ?? "").trim().toLowerCase()}|${String(n ?? "").trim().toLowerCase()}`;
+      const fuMap = new Map();
+      for (const r of fuRes.recordset || []) {
+        const k = key(r.PropertyName, r.Unit, r.TenantName);
+        const iso = r.NextFollowUp instanceof Date
+          ? r.NextFollowUp.toISOString()
+          : (r.NextFollowUp ?? null);
+        if (iso) fuMap.set(k, iso);
+      }
+      if (fuMap.size > 0) {
+        for (const u of units) {
+          const k = key(u.property, u.unit, u.name);
+          const iso = fuMap.get(k);
+          if (iso) u.nextFollowUp = iso;
+        }
+      }
+    } catch (e) {
+      if (!/Invalid object name/i.test(String(e?.message || ""))) throw e;
+      /* legal cases table not yet migrated; keep legacy nextFollowUp values */
+    }
+  }
+
+  /** Overlay: each row's `note` is the latest manual UnitDetailNote body for that tenant identity.
+   *  Auto notes (e.g. email-send logs) are intentionally ignored here. Silently skipped if the
+   *  notes table doesn't exist. */
+  if (units.length > 0) {
+    try {
+      const noteInputs = { companyId: { type: sql.Int, value: companyId } };
+      allowed.forEach((name, i) => {
+        noteInputs[`noteProp${i}`] = { type: sql.NVarChar(400), value: name };
+      });
+      const notePlaceholders = allowed.map((_, i) => `@noteProp${i}`).join(", ");
+      const noteRes = await query(
+        `SELECT PropertyName, Unit, TenantName, Body
+         FROM (
+           SELECT n.PropertyName, n.Unit, n.TenantName, n.Body,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY n.PropertyName, n.Unit, n.TenantName
+                    ORDER BY n.CreatedAt DESC, n.Id DESC
+                  ) AS rn
+           FROM dbo.UnitDetailNote n
+           WHERE n.CompanyId = @companyId
+             AND n.PropertyName IN (${notePlaceholders})
+             AND LOWER(CAST(ISNULL(n.NoteSource, N'manual') AS NVARCHAR(16))) = N'manual'
+         ) a
+         WHERE a.rn = 1`,
+        noteInputs
+      );
+      const key = (p, u, n) =>
+        `${String(p ?? "").trim().toLowerCase()}|${String(u ?? "").trim().toLowerCase()}|${String(n ?? "").trim().toLowerCase()}`;
+      const noteMap = new Map();
+      for (const r of noteRes.recordset || []) {
+        const k = key(r.PropertyName, r.Unit, r.TenantName);
+        const body = r.Body == null ? "" : String(r.Body);
+        noteMap.set(k, body);
+      }
+      for (const u of units) {
+        const k = key(u.property, u.unit, u.name);
+        u.note = noteMap.has(k) ? noteMap.get(k) : "";
+      }
+    } catch (e) {
+      if (!/Invalid object name/i.test(String(e?.message || ""))) throw e;
+      /* notes table not yet migrated; just leave note empty */
+    }
+  }
+
   res.json({ units, erpStaticLink });
 }
 
@@ -993,15 +1129,21 @@ async function deleteUnitNote(req, res) {
   }
   const inputs = { id: { type: sql.Int, value: id }, companyId: { type: sql.Int, value: companyId } };
   const pre = await query(
-    `SELECT PropertyName AS pn FROM dbo.UnitDetailNote WHERE Id = @id AND CompanyId = @companyId`,
+    `SELECT PropertyName AS pn, CAST(NoteSource AS NVARCHAR(16)) AS src
+     FROM dbo.UnitDetailNote WHERE Id = @id AND CompanyId = @companyId`,
     inputs
   );
-  const pn = pre.recordset[0]?.pn ?? pre.recordset[0]?.Pn;
+  const row0 = pre.recordset[0];
+  const pn = row0?.pn ?? row0?.Pn;
   if (pn == null) {
     return res.status(404).json({ error: "not found" });
   }
   if (!memberCanAccessProperty(ctx, pn)) {
     return res.status(403).json({ error: "No access to this note." });
+  }
+  const src = String(row0?.src ?? "manual").toLowerCase();
+  if (src === "auto") {
+    return res.status(400).json({ error: "Automatic notes cannot be deleted" });
   }
 
   const result = await query(

@@ -785,28 +785,30 @@ async function putUnitDetailColumnPrefs(req, res) {
 async function listPropertyListNames(req, res) {
   const ctx = readCompanyContext(req, res);
   if (!ctx) return;
-  const companyId = ctx.companyId;
 
-  const result = await query(
-    `SELECT DISTINCT LTRIM(RTRIM(ListName)) AS value
-     FROM dbo.Properties
-     WHERE CompanyId = @companyId
-       AND ListName IS NOT NULL
-       AND LTRIM(RTRIM(ListName)) <> N''
-     ORDER BY value`,
-    { companyId: { type: sql.Int, value: companyId } }
-  );
-  const fromDb = result.recordset.map((r) => r.value).filter(Boolean);
-  const presets = ["List1", "List2", "List3"];
-  const merged = [...new Set([...presets, ...fromDb])];
-  res.json({ listNames: merged });
+  try {
+    const result = await query(
+      `SELECT Name AS value
+       FROM dbo.LegalStatusPresetList
+       ORDER BY Name`
+    );
+    res.json({ listNames: result.recordset.map((r) => r.value).filter(Boolean) });
+  } catch (err) {
+    if (/Invalid object name/i.test(String(err?.message || ""))) {
+      return res.json({ listNames: [] });
+    }
+    throw err;
+  }
 }
 
 function rowReminderEmailLog(r) {
   const sent = r.SentAt ?? r.sentAt;
+  const rawType = r.Type ?? r.type ?? "reminder";
+  const type = String(rawType).toLowerCase() === "invite" ? "invite" : "reminder";
   return {
     id: r.Id ?? r.id,
     companyId: r.CompanyId ?? r.companyId,
+    type,
     senderMailbox: r.SenderMailbox ?? r.senderMailbox ?? "",
     toEmail: r.ToEmail ?? r.toEmail ?? "",
     subject: r.Subject ?? r.subject ?? "",
@@ -827,7 +829,7 @@ async function listReminderEmailLog(req, res) {
   try {
     const result = await query(
       `SELECT TOP 200
-         Id, CompanyId, SenderMailbox, ToEmail, Subject, SentAt,
+         Id, CompanyId, [Type], SenderMailbox, ToEmail, Subject, SentAt,
          GraphMessageId, GraphConversationId, TenantLabel, PropertyName, BodyPreview
        FROM dbo.ReminderEmailLog
        WHERE CompanyId = @companyId
@@ -836,10 +838,17 @@ async function listReminderEmailLog(req, res) {
     );
     res.json({ entries: result.recordset.map(rowReminderEmailLog) });
   } catch (err) {
-    if (/Invalid object name/i.test(String(err?.message || ""))) {
+    const msg = String(err?.message || "");
+    if (/Invalid object name/i.test(msg)) {
       return res.status(503).json({
         error:
           "ReminderEmailLog table is missing. Run backend/scripts/migrate-reminder-email-log.sql on the database."
+      });
+    }
+    if (/Invalid column name .?Type/i.test(msg)) {
+      return res.status(503).json({
+        error:
+          "ReminderEmailLog.Type column is missing. Run backend/scripts/migrate-reminder-email-log-add-type.sql on the database."
       });
     }
     throw err;
@@ -852,6 +861,8 @@ async function postReminderEmailLog(req, res) {
   const companyId = ctx.companyId;
 
   const b = req.body || {};
+  const rawType = String(b.type || "reminder").toLowerCase();
+  const type = rawType === "invite" ? "invite" : "reminder";
   const senderMailbox = String(b.senderMailbox || "").trim();
   const toEmail = String(b.toEmail || "").trim();
   const graphMessageId = String(b.graphMessageId || "").trim();
@@ -862,7 +873,8 @@ async function postReminderEmailLog(req, res) {
   if (!toEmail) {
     return res.status(400).json({ error: "toEmail is required" });
   }
-  if (!graphMessageId) {
+  /** graphMessageId is mandatory for reminders (used for reply threading) but optional for SMTP/invite sends. */
+  if (type === "reminder" && !graphMessageId) {
     return res.status(400).json({ error: "graphMessageId is required" });
   }
 
@@ -880,18 +892,19 @@ async function postReminderEmailLog(req, res) {
   try {
     const result = await query(
       `INSERT INTO dbo.ReminderEmailLog (
-         CompanyId, SenderMailbox, ToEmail, Subject, SentAt,
+         CompanyId, [Type], SenderMailbox, ToEmail, Subject, SentAt,
          GraphMessageId, GraphConversationId, TenantLabel, PropertyName, BodyPreview
        )
-       OUTPUT INSERTED.Id, INSERTED.CompanyId, INSERTED.SenderMailbox, INSERTED.ToEmail, INSERTED.Subject,
+       OUTPUT INSERTED.Id, INSERTED.CompanyId, INSERTED.[Type], INSERTED.SenderMailbox, INSERTED.ToEmail, INSERTED.Subject,
               INSERTED.SentAt, INSERTED.GraphMessageId, INSERTED.GraphConversationId,
               INSERTED.TenantLabel, INSERTED.PropertyName, INSERTED.BodyPreview
        VALUES (
-         @companyId, @senderMailbox, @toEmail, @subject, ISNULL(@sentAt, SYSUTCDATETIME()),
+         @companyId, @type, @senderMailbox, @toEmail, @subject, ISNULL(@sentAt, SYSUTCDATETIME()),
          @graphMessageId, @graphConversationId, @tenantLabel, @propertyName, @bodyPreview
        )`,
       {
         companyId: { type: sql.Int, value: companyId },
+        type: { type: sql.NVarChar(32), value: type },
         senderMailbox: { type: sql.NVarChar(320), value: senderMailbox },
         toEmail: { type: sql.NVarChar(320), value: toEmail },
         subject: { type: sql.NVarChar(500), value: subject },
@@ -905,14 +918,319 @@ async function postReminderEmailLog(req, res) {
     );
     res.status(201).json({ entry: rowReminderEmailLog(result.recordset[0]) });
   } catch (err) {
-    if (/Invalid object name/i.test(String(err?.message || ""))) {
+    const msg = String(err?.message || "");
+    if (/Invalid object name/i.test(msg)) {
       return res.status(503).json({
         error:
           "ReminderEmailLog table is missing. Run backend/scripts/migrate-reminder-email-log.sql on the database."
       });
     }
+    if (/Invalid column name .?Type/i.test(msg)) {
+      return res.status(503).json({
+        error:
+          "ReminderEmailLog.Type column is missing. Run backend/scripts/migrate-reminder-email-log-add-type.sql on the database."
+      });
+    }
     throw err;
   }
+}
+
+/* ---------------------------------------------------------------------------
+ * Legal-status preset lists (properties choose one via Properties.ListName)
+ * ------------------------------------------------------------------------- */
+
+function rowLegalStatusPresetList(r) {
+  return {
+    id: Number(r.Id ?? r.id),
+    name: String(r.Name ?? r.name ?? "").trim(),
+    optionCount: r.OptionCount != null ? Number(r.OptionCount) : 0
+  };
+}
+
+function rowLegalStatusPresetOption(r) {
+  return {
+    id: Number(r.Id ?? r.id),
+    listId: Number(r.ListId ?? r.listId),
+    status: String(r.Status ?? r.status ?? "").trim(),
+    sortOrder: r.SortOrder != null ? Number(r.SortOrder) : 0
+  };
+}
+
+async function presetListExists(listId) {
+  const result = await query(
+    `SELECT 1 AS ok FROM dbo.LegalStatusPresetList WHERE Id = @listId`,
+    { listId: { type: sql.Int, value: listId } }
+  );
+  return result.recordset.length > 0;
+}
+
+async function listLegalStatusPresetLists(req, res) {
+  const ctx = readCompanyContext(req, res);
+  if (!ctx) return;
+  try {
+    const result = await query(
+      `SELECT l.Id, l.Name, COUNT(o.Id) AS OptionCount
+       FROM dbo.LegalStatusPresetList l
+       LEFT JOIN dbo.LegalStatusPresetOption o ON o.ListId = l.Id
+       GROUP BY l.Id, l.Name
+       ORDER BY l.Name`
+    );
+    res.json({ lists: (result.recordset || []).map(rowLegalStatusPresetList) });
+  } catch (err) {
+    if (/Invalid object name/i.test(String(err?.message || ""))) {
+      return res.status(503).json({
+        error:
+          "LegalStatusPresetList table is missing. Run backend/scripts/migrate-legal-status-presets.sql on the database."
+      });
+    }
+    throw err;
+  }
+}
+
+async function createLegalStatusPresetList(req, res) {
+  const ctx = readCompanyContext(req, res);
+  if (!ctx) return;
+  const name = req.body?.name != null ? String(req.body.name).trim().slice(0, 100) : "";
+  if (!name) {
+    return res.status(400).json({ error: "name is required" });
+  }
+  try {
+    const result = await query(
+      `INSERT INTO dbo.LegalStatusPresetList (Name)
+       OUTPUT INSERTED.Id, INSERTED.Name
+       VALUES (@name)`,
+      { name: { type: sql.NVarChar(100), value: name } }
+    );
+    res.status(201).json({ list: rowLegalStatusPresetList(result.recordset[0]) });
+  } catch (err) {
+    if (/UQ_LegalStatusPresetList_(Name|CompanyName)|UNIQUE/i.test(String(err?.message || ""))) {
+      return res.status(409).json({ error: "This preset list already exists." });
+    }
+    throw err;
+  }
+}
+
+async function updateLegalStatusPresetList(req, res) {
+  const ctx = readCompanyContext(req, res);
+  if (!ctx) return;
+  const id = Number(req.params.listId);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ error: "Invalid id" });
+  }
+  const name = req.body?.name != null ? String(req.body.name).trim().slice(0, 100) : "";
+  if (!name) {
+    return res.status(400).json({ error: "name is required" });
+  }
+  try {
+    const before = await query(
+      `SELECT Name FROM dbo.LegalStatusPresetList WHERE Id = @id`,
+      { id: { type: sql.Int, value: id } }
+    );
+    const previousName = before.recordset?.[0]?.Name || null;
+    const result = await query(
+      `UPDATE dbo.LegalStatusPresetList
+       SET Name = @name
+       OUTPUT INSERTED.Id
+       WHERE Id = @id`,
+      {
+        id: { type: sql.Int, value: id },
+        name: { type: sql.NVarChar(100), value: name }
+      }
+    );
+    if (!result.recordset?.length) {
+      return res.status(404).json({ error: "not found" });
+    }
+    // Lists are global, so update Properties.ListName + CompanyCollectionSettings everywhere.
+    if (previousName && previousName !== name) {
+      await query(
+        `UPDATE dbo.Properties
+         SET ListName = @name
+         WHERE ListName = @previousName`,
+        {
+          name: { type: sql.NVarChar(100), value: name },
+          previousName: { type: sql.NVarChar(100), value: previousName }
+        }
+      );
+      try {
+        await query(
+          `UPDATE dbo.CompanyCollectionSettings
+           SET DefaultLegalStatusList = @name
+           WHERE DefaultLegalStatusList = @previousName`,
+          {
+            name: { type: sql.NVarChar(100), value: name },
+            previousName: { type: sql.NVarChar(100), value: previousName }
+          }
+        );
+      } catch (e) {
+        if (!/Invalid (column|object) name/i.test(String(e?.message || ""))) throw e;
+      }
+    }
+    res.status(204).end();
+  } catch (err) {
+    if (/UQ_LegalStatusPresetList_(Name|CompanyName)|UNIQUE/i.test(String(err?.message || ""))) {
+      return res.status(409).json({ error: "This preset list already exists." });
+    }
+    throw err;
+  }
+}
+
+async function deleteLegalStatusPresetList(req, res) {
+  const ctx = readCompanyContext(req, res);
+  if (!ctx) return;
+  const id = Number(req.params.listId);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ error: "Invalid id" });
+  }
+  const usage = await query(
+    `SELECT COUNT(*) AS cnt
+     FROM dbo.Properties p
+     INNER JOIN dbo.LegalStatusPresetList l ON l.Name = p.ListName
+     WHERE l.Id = @id`,
+    { id: { type: sql.Int, value: id } }
+  );
+  const usageCount = scalarCount(usage.recordset);
+  if (usageCount > 0) {
+    return res.status(409).json({
+      error: `Cannot delete: ${usageCount} ${usageCount === 1 ? "property is" : "properties are"} using this list. Switch them to a different list first.`
+    });
+  }
+  const result = await query(
+    `DELETE FROM dbo.LegalStatusPresetList
+     OUTPUT DELETED.Id
+     WHERE Id = @id`,
+    { id: { type: sql.Int, value: id } }
+  );
+  if (!result.recordset?.length) {
+    return res.status(404).json({ error: "not found" });
+  }
+  res.status(204).end();
+}
+
+async function listLegalStatusPresetOptions(req, res) {
+  const ctx = readCompanyContext(req, res);
+  if (!ctx) return;
+  const listId = Number(req.params.listId);
+  if (!Number.isInteger(listId) || listId <= 0) {
+    return res.status(400).json({ error: "Invalid listId" });
+  }
+  if (!(await presetListExists(listId))) {
+    return res.status(404).json({ error: "Preset list not found" });
+  }
+  const result = await query(
+    `SELECT Id, ListId, Status, SortOrder
+     FROM dbo.LegalStatusPresetOption
+     WHERE ListId = @listId
+     ORDER BY SortOrder ASC, Status ASC`,
+    { listId: { type: sql.Int, value: listId } }
+  );
+  res.json({ options: (result.recordset || []).map(rowLegalStatusPresetOption) });
+}
+
+async function createLegalStatusPresetOption(req, res) {
+  const ctx = readCompanyContext(req, res);
+  if (!ctx) return;
+  const listId = Number(req.params.listId);
+  if (!Number.isInteger(listId) || listId <= 0) {
+    return res.status(400).json({ error: "Invalid listId" });
+  }
+  if (!(await presetListExists(listId))) {
+    return res.status(404).json({ error: "Preset list not found" });
+  }
+  const status = req.body?.status != null ? String(req.body.status).trim().slice(0, 200) : "";
+  if (!status) {
+    return res.status(400).json({ error: "status is required" });
+  }
+  const sortOrder = Number.isInteger(Number(req.body?.sortOrder)) ? Number(req.body.sortOrder) : 0;
+  try {
+    const result = await query(
+      `INSERT INTO dbo.LegalStatusPresetOption (ListId, Status, SortOrder)
+       OUTPUT INSERTED.Id, INSERTED.ListId, INSERTED.Status, INSERTED.SortOrder
+       VALUES (@listId, @status, @sortOrder)`,
+      {
+        listId: { type: sql.Int, value: listId },
+        status: { type: sql.NVarChar(200), value: status },
+        sortOrder: { type: sql.Int, value: sortOrder }
+      }
+    );
+    res.status(201).json({ option: rowLegalStatusPresetOption(result.recordset[0]) });
+  } catch (err) {
+    if (/UQ_LegalStatusPresetOption_ListStatus|UNIQUE/i.test(String(err?.message || ""))) {
+      return res.status(409).json({ error: "This status already exists in this list." });
+    }
+    throw err;
+  }
+}
+
+async function updateLegalStatusPresetOption(req, res) {
+  const ctx = readCompanyContext(req, res);
+  if (!ctx) return;
+  const listId = Number(req.params.listId);
+  const id = Number(req.params.id);
+  if (!Number.isInteger(listId) || listId <= 0 || !Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ error: "Invalid id" });
+  }
+  if (!(await presetListExists(listId))) {
+    return res.status(404).json({ error: "Preset list not found" });
+  }
+  const fields = [];
+  const inputs = {
+    id: { type: sql.Int, value: id },
+    listId: { type: sql.Int, value: listId }
+  };
+  if (req.body?.status !== undefined) {
+    const status = String(req.body.status ?? "").trim().slice(0, 200);
+    if (!status) return res.status(400).json({ error: "status is required" });
+    fields.push("Status = @status");
+    inputs.status = { type: sql.NVarChar(200), value: status };
+  }
+  if (req.body?.sortOrder !== undefined) {
+    const sortOrder = Number(req.body.sortOrder);
+    fields.push("SortOrder = @sortOrder");
+    inputs.sortOrder = { type: sql.Int, value: Number.isInteger(sortOrder) ? sortOrder : 0 };
+  }
+  if (fields.length === 0) {
+    return res.status(400).json({ error: "Nothing to update" });
+  }
+  try {
+    const result = await query(
+      `UPDATE dbo.LegalStatusPresetOption
+       SET ${fields.join(", ")}
+       OUTPUT INSERTED.Id
+       WHERE Id = @id AND ListId = @listId`,
+      inputs
+    );
+    if (!result.recordset?.length) return res.status(404).json({ error: "not found" });
+    res.status(204).end();
+  } catch (err) {
+    if (/UQ_LegalStatusPresetOption_ListStatus|UNIQUE/i.test(String(err?.message || ""))) {
+      return res.status(409).json({ error: "This status already exists in this list." });
+    }
+    throw err;
+  }
+}
+
+async function deleteLegalStatusPresetOption(req, res) {
+  const ctx = readCompanyContext(req, res);
+  if (!ctx) return;
+  const listId = Number(req.params.listId);
+  const id = Number(req.params.id);
+  if (!Number.isInteger(listId) || listId <= 0 || !Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ error: "Invalid id" });
+  }
+  if (!(await presetListExists(listId))) {
+    return res.status(404).json({ error: "Preset list not found" });
+  }
+  const result = await query(
+    `DELETE FROM dbo.LegalStatusPresetOption
+     OUTPUT DELETED.Id
+     WHERE Id = @id AND ListId = @listId`,
+    {
+      id: { type: sql.Int, value: id },
+      listId: { type: sql.Int, value: listId }
+    }
+  );
+  if (!result.recordset?.length) return res.status(404).json({ error: "not found" });
+  res.status(204).end();
 }
 
 module.exports = {
@@ -934,5 +1252,13 @@ module.exports = {
   putUnitDetailColumnPrefs,
   listPropertyListNames,
   listReminderEmailLog,
-  postReminderEmailLog
+  postReminderEmailLog,
+  listLegalStatusPresetLists,
+  createLegalStatusPresetList,
+  updateLegalStatusPresetList,
+  deleteLegalStatusPresetList,
+  listLegalStatusPresetOptions,
+  createLegalStatusPresetOption,
+  updateLegalStatusPresetOption,
+  deleteLegalStatusPresetOption
 };

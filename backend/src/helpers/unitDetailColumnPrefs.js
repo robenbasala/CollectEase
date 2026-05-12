@@ -8,6 +8,7 @@ const ALL_KEYS = [
   "rent",
   "monthsDelinquent",
   "legalStatus",
+  "note",
   "nextFollowUp",
   "lastPayment",
   "phone",

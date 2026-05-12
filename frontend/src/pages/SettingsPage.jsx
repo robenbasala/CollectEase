@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
-import { ArrowLeft, CircleUser, ImageIcon } from "lucide-react";
+import { ImageIcon } from "lucide-react";
 import { api } from "../api/apiClient";
 import { getActiveCompanyId, getCompanyDisplayName } from "../config/company.js";
+import PageHeader from "../components/PageHeader";
 import Spinner from "../components/Spinner";
 
 function numToInput(v) {
@@ -199,21 +199,9 @@ export default function SettingsPage() {
 
   return (
     <div className="settings-screen-root">
-      <header className="settings-top-bar">
-        <div className="settings-top-left">
-          <Link to="/">
-            <ArrowLeft size={20} strokeWidth={2.25} aria-hidden />
-            Back
-          </Link>
-          <span className="settings-top-brand-mark" aria-hidden />
-        </div>
-        <h1 className="settings-top-title">Settings</h1>
-        <div className="settings-top-user" title="Profile">
-          <CircleUser size={22} strokeWidth={2} aria-hidden />
-        </div>
-      </header>
-
       <div className="settings-main">
+        <PageHeader title="Settings" backTo="/" />
+
         {loading && <Spinner />}
         {error && (
           <div

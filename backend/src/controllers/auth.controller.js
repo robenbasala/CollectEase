@@ -16,6 +16,51 @@ function publicOrigin() {
   return String(o).replace(/\/+$/, "");
 }
 
+/**
+ * Firebase's `generatePasswordResetLink` returns a hosted URL like
+ *   https://<project>.firebaseapp.com/__/auth/action?mode=resetPassword&oobCode=...&apiKey=...
+ * Rewrite it so users land on our designed /reset-password page instead of the default Firebase UI.
+ * `verifyPasswordResetCode` / `confirmPasswordReset` on the client validate the same oobCode regardless.
+ */
+function rewriteToAppResetPage(firebaseLink) {
+  try {
+    const u = new URL(firebaseLink);
+    const oobCode = u.searchParams.get("oobCode");
+    if (!oobCode) return firebaseLink;
+    const target = new URL("/reset-password", publicOrigin());
+    for (const key of ["mode", "oobCode", "apiKey", "lang", "continueUrl"]) {
+      const v = u.searchParams.get(key);
+      if (v != null) target.searchParams.set(key, v);
+    }
+    if (!target.searchParams.get("mode")) target.searchParams.set("mode", "resetPassword");
+    return target.toString();
+  } catch {
+    return firebaseLink;
+  }
+}
+
+async function recordPendingInvitation({ email, companyId, role, propertyIds }) {
+  try {
+    await query(
+      `INSERT INTO dbo.UserInvitation (Email, CompanyId, Role, PropertyIdsJson, CreatedByAppUserId)
+       VALUES (@email, @companyId, @role, @propertyIdsJson, NULL)`,
+      {
+        email: { type: sql.NVarChar(320), value: email },
+        companyId: { type: sql.Int, value: companyId },
+        role: { type: sql.NVarChar(32), value: role },
+        propertyIdsJson: {
+          type: sql.NVarChar(sql.MAX),
+          value: JSON.stringify(Array.isArray(propertyIds) ? propertyIds : [])
+        }
+      }
+    );
+  } catch (e) {
+    // Keep invite delivery working even on databases that have not run the auth migration yet.
+    if (/Invalid object name/i.test(String(e?.message || ""))) return;
+    throw e;
+  }
+}
+
 async function getMe(req, res) {
   const u = req.ct;
   res.json({
@@ -92,12 +137,19 @@ async function postInvite(req, res) {
       companyId: targetCompanyId,
       propertyIds: role === "member" ? propertyIds : []
     });
+    await recordPendingInvitation({
+      email,
+      companyId: targetCompanyId,
+      role,
+      propertyIds: role === "member" ? propertyIds : []
+    });
 
     const continueUrl = `${publicOrigin()}/login`;
-    const passwordResetLink = await auth.generatePasswordResetLink(email, { url: continueUrl });
+    const firebaseResetLink = await auth.generatePasswordResetLink(email, { url: continueUrl });
+    const passwordResetLink = rewriteToAppResetPage(firebaseResetLink);
 
     const appNameInvite = process.env.INVITE_APP_NAME || "CollectEase";
-    const inviteSubject = `You're invited to ${appNameInvite}`;
+    const inviteSubject = `Welcome to ${appNameInvite} — set your password`;
     const inviteHtml = buildInviteHtml({
       appName: appNameInvite,
       passwordResetLink,
@@ -113,12 +165,15 @@ async function postInvite(req, res) {
     }
     const emailed = mailResult.ok === true;
     const exposeLink = !emailed || process.env.INVITE_EXPOSE_LINK === "true";
+    /** Returned to the client so the email log entry shows who sent it when SMTP delivery is used. */
+    const smtpFrom = (process.env.SMTP_FROM || process.env.SMTP_USER || "").trim();
 
     res.status(201).json({
       ok: true,
       emailed,
       preferMailboxDelivery: preferMailbox,
       graphInvite: { subject: inviteSubject, html: inviteHtml },
+      ...(emailed && smtpFrom ? { smtpFrom } : {}),
       ...(mailResult.reason ? { emailNotice: mailResult.reason } : {}),
       ...(exposeLink ? { passwordResetLink } : {})
     });
@@ -160,6 +215,8 @@ async function listUsers(req, res) {
     propertyIds: p.propertyIds,
     lastLoginAt: p.lastLoginAt ?? null,
     accountCreatedAt: p.accountCreatedAt ?? null,
+    invitationPending: Boolean(p.invitationPending),
+    active: Boolean(p.active),
     disabled: Boolean(p.disabled)
   }));
 
@@ -219,7 +276,9 @@ async function listPropertyOptions(req, res) {
     }
   }
   const result = await query(
-    `SELECT pr.Id AS id, pr.Name AS name, p.Name AS portfolioName, r.Name AS regionName
+    `SELECT pr.Id AS id, pr.Name AS name,
+            p.Id AS portfolioId, p.Name AS portfolioName,
+            r.Id AS regionId, r.Name AS regionName
      FROM dbo.Properties pr
      INNER JOIN dbo.Portfolios p ON p.Id = pr.PortfolioId AND p.CompanyId = pr.CompanyId
      INNER JOIN dbo.Regions r ON r.Id = p.RegionId AND r.CompanyId = pr.CompanyId
@@ -231,7 +290,9 @@ async function listPropertyOptions(req, res) {
     properties: (result.recordset || []).map((row) => ({
       id: row.Id ?? row.id,
       name: row.Name ?? row.name ?? "",
+      portfolioId: row.portfolioId ?? row.PortfolioId ?? null,
       portfolioName: row.portfolioName ?? row.PortfolioName ?? "",
+      regionId: row.regionId ?? row.RegionId ?? null,
       regionName: row.regionName ?? row.RegionName ?? ""
     }))
   });

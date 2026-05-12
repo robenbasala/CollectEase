@@ -30,6 +30,15 @@ router.post("/properties", wrap(ctrl.createProperty));
 router.put("/properties/:id", wrap(ctrl.updateProperty));
 router.delete("/properties/:id", wrap(ctrl.deleteProperty));
 
+router.get("/legal-status-preset-lists", wrap(ctrl.listLegalStatusPresetLists));
+router.post("/legal-status-preset-lists", wrap(ctrl.createLegalStatusPresetList));
+router.put("/legal-status-preset-lists/:listId", wrap(ctrl.updateLegalStatusPresetList));
+router.delete("/legal-status-preset-lists/:listId", wrap(ctrl.deleteLegalStatusPresetList));
+router.get("/legal-status-preset-lists/:listId/options", wrap(ctrl.listLegalStatusPresetOptions));
+router.post("/legal-status-preset-lists/:listId/options", wrap(ctrl.createLegalStatusPresetOption));
+router.put("/legal-status-preset-lists/:listId/options/:id", wrap(ctrl.updateLegalStatusPresetOption));
+router.delete("/legal-status-preset-lists/:listId/options/:id", wrap(ctrl.deleteLegalStatusPresetOption));
+
 router.put("/company-settings", wrap(ctrl.putCompanySettings));
 router.put("/unit-detail-columns", wrap(ctrl.putUnitDetailColumnPrefs));
 router.put("/collection-settings", wrap(ctrl.putCompanySettings));

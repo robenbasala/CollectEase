@@ -72,6 +72,8 @@ function getSortValue(u, key) {
     }
     case "legalStatus":
       return u.legalStatus ?? "";
+    case "note":
+      return u.note ?? "";
     case "nextFollowUp":
       if (!u.nextFollowUp) return null;
       const t = new Date(u.nextFollowUp).getTime();
@@ -188,6 +190,15 @@ function renderBodyCells(u, visibleOrder, baseLink, openPaymentReminder, reminde
       case "legalStatus":
         parts.push(<td key="ls">{u.legalStatus ?? "—"}</td>);
         break;
+      case "note": {
+        const noteText = String(u.note ?? "").trim();
+        parts.push(
+          <td key="nt" className="unit-detail-note-cell" title={noteText || undefined}>
+            {noteText || "—"}
+          </td>
+        );
+        break;
+      }
       case "nextFollowUp":
         parts.push(<td key="nf">{formatDate(u.nextFollowUp)}</td>);
         break;
@@ -412,12 +423,24 @@ export default function UnitDetailsTable({
     } else {
       const label = UNIT_DETAIL_COLUMN_LABELS[key];
       headerRow1.push(
-        <th key={key} rowSpan={headerRowSpan} className="th-sortable">
+        <th
+          key={key}
+          rowSpan={headerRowSpan}
+          className={`th-sortable th-col-${key}`}
+        >
           <SortHeaderButton label={label} colKey={key} {...sh(key)} onSort={handleSort} />
         </th>
       );
     }
   }
+
+  /** Resolve row count: prefer the value the caller passes (matches the un-paginated dataset for this property
+   *  block, even when other parts of the UI later slice it). Fall back to the live array length so this stays
+   *  correct when the component is used standalone without a blockCaption. */
+  const blockRowCount =
+    blockCaption && Number.isFinite(Number(blockCaption.rowCount))
+      ? Number(blockCaption.rowCount)
+      : units.length;
 
   if (!units.length) {
     return (
@@ -426,6 +449,9 @@ export default function UnitDetailsTable({
           <div className="property-detail-unit-block__head">
             <h3 className="property-detail-unit-block__title">{blockCaption.propertyName}</h3>
             <div className="property-detail-unit-block__meta">
+              <span className="property-detail-unit-block__count">
+                {blockRowCount} {blockRowCount === 1 ? "row" : "rows"}
+              </span>
               <span className="property-detail-unit-block__total money">
                 Total balance: {formatMoney(blockCaption.totalBalance)}
               </span>
@@ -443,6 +469,9 @@ export default function UnitDetailsTable({
         <div className="property-detail-unit-block__head">
           <h3 className="property-detail-unit-block__title">{blockCaption.propertyName}</h3>
           <div className="property-detail-unit-block__meta">
+            <span className="property-detail-unit-block__count">
+              {blockRowCount} {blockRowCount === 1 ? "row" : "rows"}
+            </span>
             <span className="property-detail-unit-block__total money">
               Total balance: {formatMoney(blockCaption.totalBalance)}
             </span>

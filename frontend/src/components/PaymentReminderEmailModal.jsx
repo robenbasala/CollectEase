@@ -4,6 +4,7 @@ import { api } from "../api/apiClient";
 import { buildPaymentReminderEmailHtml, plainTextFromHtml } from "../utils/paymentReminderEmailHtml";
 import {
   getActiveMsAccount,
+  getMyOutlookContact,
   isMicrosoftMailConfigured,
   loginMicrosoft,
   sendReminderEmail
@@ -25,7 +26,8 @@ export default function PaymentReminderEmailModal({ open, unit, context, onClose
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState("");
   const [msAccountLabel, setMsAccountLabel] = useState("");
-
+  /** Sender contact card fetched from Microsoft Graph /me — overrides env-derived senderName / senderPhone. */
+  const [outlookContact, setOutlookContact] = useState(null);
   useEffect(() => {
     if (open) {
       setComment("");
@@ -37,6 +39,7 @@ export default function PaymentReminderEmailModal({ open, unit, context, onClose
   useEffect(() => {
     if (!open || !isMicrosoftMailConfigured()) {
       setMsAccountLabel("");
+      setOutlookContact(null);
       return;
     }
     let alive = true;
@@ -44,21 +47,37 @@ export default function PaymentReminderEmailModal({ open, unit, context, onClose
       const acc = await getActiveMsAccount();
       if (!alive) return;
       setMsAccountLabel(acc?.username || acc?.name || "");
+      if (acc) {
+        const card = await getMyOutlookContact();
+        if (alive) setOutlookContact(card);
+      } else if (alive) {
+        setOutlookContact(null);
+      }
     })();
     return () => {
       alive = false;
     };
   }, [open]);
 
+  /** Merge so signed-in Outlook user's name & phone win over the env-derived defaults. */
+  const effectiveContext = useMemo(() => {
+    const base = context || {};
+    if (!outlookContact) return base;
+    const senderName = outlookContact.displayName?.trim() || base.senderName || "";
+    const senderPhone = outlookContact.phone?.trim() || base.senderPhone || "";
+    const replyEmail = outlookContact.email?.trim() || base.replyEmail || "";
+    return { ...base, senderName, senderPhone, replyEmail };
+  }, [context, outlookContact]);
+
   const html = useMemo(() => {
     if (!unit) return "";
-    return buildPaymentReminderEmailHtml(unit, context || {});
-  }, [unit, context]);
+    return buildPaymentReminderEmailHtml(unit, effectiveContext);
+  }, [unit, effectiveContext]);
 
   if (!open || !unit) return null;
 
   const tenantEmail = unit.email ? String(unit.email).trim() : "";
-  const fallbackTo = context?.replyEmail ? String(context.replyEmail).trim() : "";
+  const fallbackTo = effectiveContext?.replyEmail ? String(effectiveContext.replyEmail).trim() : "";
   const sendTarget = tenantEmail || fallbackTo;
 
   function handleCancel() {
@@ -79,14 +98,30 @@ export default function PaymentReminderEmailModal({ open, unit, context, onClose
     setSending(true);
     try {
       let acc = await getActiveMsAccount();
+      let cardForSend = outlookContact;
       if (!acc) {
         await loginMicrosoft();
         acc = await getActiveMsAccount();
         setMsAccountLabel(acc?.username || acc?.name || "");
+        cardForSend = await getMyOutlookContact();
+        setOutlookContact(cardForSend);
+      } else if (!cardForSend) {
+        cardForSend = await getMyOutlookContact();
+        if (cardForSend) setOutlookContact(cardForSend);
       }
+      /** Rebuild HTML right before send so the just-fetched Outlook contact (name/phone) lands in the email. */
+      const sendContext = cardForSend
+        ? {
+            ...(context || {}),
+            senderName: cardForSend.displayName?.trim() || (context?.senderName ?? ""),
+            senderPhone: cardForSend.phone?.trim() || (context?.senderPhone ?? ""),
+            replyEmail: cardForSend.email?.trim() || (context?.replyEmail ?? "")
+          }
+        : context || {};
+      const htmlForSend = buildPaymentReminderEmailHtml(unit, sendContext);
       const meta = await sendReminderEmail({
         to: sendTarget,
-        htmlDocument: html,
+        htmlDocument: htmlForSend,
         subject: "Payment reminder",
         comment
       });
@@ -105,7 +140,7 @@ export default function PaymentReminderEmailModal({ open, unit, context, onClose
           sentAt: meta.sentAt,
           tenantLabel: String(unit?.name ?? unit?.TenantName ?? "").trim().slice(0, 500) || null,
           propertyName: String(unit?.property ?? "").trim().slice(0, 500) || null,
-          bodyPreview: plainTextFromHtml(html, 1900)
+          bodyPreview: plainTextFromHtml(htmlForSend, 1900)
         });
       } catch (logErr) {
         console.warn("Reminder email log failed:", logErr);
@@ -113,7 +148,17 @@ export default function PaymentReminderEmailModal({ open, unit, context, onClose
       try {
         const when = new Date();
         const dateStr = when.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
-        const body = `On ${dateStr} a payment reminder email was sent to ${sendTarget}.`;
+        const balanceAtSend = (() => {
+          const n = Number(unit?.balance);
+          if (!Number.isFinite(n)) return "";
+          try {
+            return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
+          } catch {
+            return `$${n.toFixed(2)}`;
+          }
+        })();
+        const balancePart = balanceAtSend ? ` Balance at the time of sending: ${balanceAtSend}.` : "";
+        const body = `On ${dateStr} a payment reminder email was sent to ${sendTarget}.${balancePart}`;
         await api.postDashboardUnitNote({
           property: String(unit?.property ?? "").trim(),
           unit: String(unit?.unit ?? "").trim(),
@@ -158,14 +203,6 @@ export default function PaymentReminderEmailModal({ open, unit, context, onClose
             <X size={18} />
           </button>
         </div>
-        <p className="payment-reminder-modal__hint text-muted">
-          Preview below. Optional comment is appended to the HTML body. Send uses Microsoft Graph from the account you signed in with on this page (see toolbar).
-        </p>
-        {isMicrosoftMailConfigured() && msAccountLabel ? (
-          <p className="payment-reminder-modal__ms text-muted">
-            Sending as <strong>{msAccountLabel}</strong>
-          </p>
-        ) : null}
         <div className="payment-reminder-modal__scroll">
           <iframe
             className="payment-reminder-modal__frame"

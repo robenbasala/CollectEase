@@ -2,33 +2,64 @@ const nodemailer = require("nodemailer");
 
 function buildInviteHtml({ appName, passwordResetLink, invitedEmail }) {
   const safeEmail = String(invitedEmail || "").replace(/</g, "");
+  const safeApp = String(appName || "CollectEase").replace(/</g, "");
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Your CollectEase invitation</title>
+  <title>Welcome to ${safeApp} — set your password</title>
 </head>
-<body style="margin:0;background:#0f172a;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;">
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#0f172a;padding:32px 16px;">
+<body style="margin:0;background:#f4f8f8;font-family:'Segoe UI',system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;color:#0f2744;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f4f8f8;padding:36px 16px;">
     <tr>
       <td align="center">
-        <table role="presentation" width="100%" style="max-width:520px;background:linear-gradient(165deg,#1e293b 0%,#0f172a 100%);border-radius:20px;overflow:hidden;border:1px solid rgba(148,163,184,0.2);box-shadow:0 24px 48px rgba(0,0,0,0.35);">
+        <table role="presentation" width="100%" style="max-width:560px;background:#ffffff;border-radius:20px;overflow:hidden;border:1px solid rgba(23,111,90,0.14);box-shadow:0 18px 38px rgba(15,39,68,0.08);">
           <tr>
-            <td style="padding:28px 28px 8px;text-align:center;">
-              <div style="display:inline-block;padding:10px 18px;border-radius:999px;background:rgba(34,197,94,0.15);color:#4ade80;font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;">Invitation</div>
-              <h1 style="margin:18px 0 8px;color:#f8fafc;font-size:24px;font-weight:700;letter-spacing:-0.02em;">Welcome to ${appName}</h1>
-              <p style="margin:0;color:#94a3b8;font-size:15px;line-height:1.55;">You’ve been invited to the collection dashboard. Click below to choose a password, then sign in on the app with your email and password.</p>
+            <td style="padding:0;">
+              <div style="background:linear-gradient(170deg,#ecfdf5 0%,#f4fff8 45%,#ffffff 100%);padding:30px 32px 24px;text-align:center;border-bottom:1px solid rgba(23,111,90,0.1);">
+                <div style="display:inline-block;padding:6px 14px;border-radius:999px;background:rgba(23,111,90,0.12);color:#125546;font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;">${safeApp}</div>
+                <h1 style="margin:14px 0 6px;color:#0f2744;font-size:24px;font-weight:800;letter-spacing:-0.025em;line-height:1.2;">Welcome aboard</h1>
+                <p style="margin:0;color:rgba(15,39,68,0.62);font-size:14px;line-height:1.55;">You've been invited to ${safeApp}. Let's set up your account.</p>
+              </div>
             </td>
           </tr>
           <tr>
-            <td style="padding:8px 28px 28px;text-align:center;">
-              <a href="${passwordResetLink}" style="display:inline-block;padding:14px 28px;border-radius:12px;background:linear-gradient(180deg,#22c55e,#16a34a);color:#052e16;font-weight:700;font-size:15px;text-decoration:none;box-shadow:0 8px 24px rgba(34,197,94,0.35);">Set your password</a>
-              <p style="margin:20px 0 0;font-size:12px;color:#64748b;line-height:1.5;">This link was sent to <strong style="color:#cbd5e1;">${safeEmail}</strong>. If you didn’t expect it, you can ignore this message.</p>
-              <p style="margin:16px 0 0;font-size:11px;color:#475569;word-break:break-all;">If the button doesn’t work, paste this URL into your browser:<br/><span style="color:#94a3b8;">${passwordResetLink}</span></p>
+            <td style="padding:26px 32px 8px;">
+              <p style="margin:0 0 10px;font-size:15px;font-weight:600;color:#0f2744;">Set your password for the first time</p>
+              <p style="margin:0;color:rgba(15,39,68,0.7);font-size:14px;line-height:1.6;">
+                Click the button below to choose the password you'll use to sign in. After that, return to the app and sign in with
+                <strong style="color:#125546;">${safeEmail}</strong> and your new password.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:18px 32px 26px;text-align:center;">
+              <a href="${passwordResetLink}" style="display:inline-block;padding:13px 30px;border-radius:12px;background:linear-gradient(180deg,#1f8a6f 0%,#176f5a 60%,#125546 100%);color:#ffffff;font-weight:700;font-size:15px;letter-spacing:0.01em;text-decoration:none;box-shadow:0 10px 24px rgba(23,111,90,0.28);">Set my password</a>
+              <p style="margin:18px 0 0;font-size:12px;color:rgba(15,39,68,0.5);line-height:1.5;">This link can be used only once and expires after a short time.</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:0 32px 26px;">
+              <div style="padding:14px 16px;border-radius:12px;background:#f8fafc;border:1px solid rgba(15,23,42,0.06);">
+                <p style="margin:0 0 6px;font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:rgba(15,39,68,0.55);">Button not working?</p>
+                <p style="margin:0;font-size:12px;color:rgba(15,39,68,0.7);line-height:1.55;word-break:break-all;">
+                  Copy this URL into your browser:<br/>
+                  <span style="color:#125546;">${passwordResetLink}</span>
+                </p>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:0 32px 26px;text-align:center;">
+              <p style="margin:0;font-size:12px;color:rgba(15,39,68,0.45);line-height:1.5;">
+                This email was sent to <strong style="color:rgba(15,39,68,0.65);">${safeEmail}</strong>.
+                If you didn't expect it, you can safely ignore this message.
+              </p>
             </td>
           </tr>
         </table>
+        <p style="margin:14px 0 0;font-size:11px;color:rgba(15,39,68,0.4);">© ${safeApp}</p>
       </td>
     </tr>
   </table>
@@ -71,9 +102,9 @@ async function sendInviteEmail({ to, passwordResetLink }) {
     await transporter.sendMail({
       from,
       to,
-      subject: `You’re invited to ${appName}`,
+      subject: `Welcome to ${appName} — set your password`,
       html,
-      text: `Set your password for ${appName}: ${passwordResetLink}`
+      text: `You've been invited to ${appName}. Set your password for the first time here: ${passwordResetLink}`
     });
   } catch (e) {
     const reason = e?.message || String(e);

@@ -1,8 +1,33 @@
-import { useCallback, useEffect, useState } from "react";
-import { Layers, Mail, Pencil, UserPlus } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Check,
+  ChevronDown,
+  FolderKanban,
+  Layers,
+  Mail,
+  MapPinned,
+  Pencil,
+  Search,
+  UserPlus
+} from "lucide-react";
 import { api } from "../api/apiClient";
-import { getActiveMsAccount, isMicrosoftMailConfigured, sendOutlookHtmlMail } from "../microsoft/msGraphMail.js";
+import {
+  getActiveMsAccount,
+  isMicrosoftMailConfigured,
+  loginMicrosoft,
+  sendOutlookHtmlMail
+} from "../microsoft/msGraphMail.js";
+import { plainTextFromHtml } from "../utils/paymentReminderEmailHtml";
 import Spinner from "./Spinner";
+
+async function logInviteEmail(entry) {
+  try {
+    await api.postAdminReminderEmailLog(entry);
+  } catch (e) {
+    /* eslint-disable-next-line no-console */
+    console.warn("Could not record invite email in log:", e?.message || e);
+  }
+}
 
 function formatAuthInstant(iso) {
   if (iso == null || String(iso).trim() === "") return "—";
@@ -11,56 +36,271 @@ function formatAuthInstant(iso) {
   return d.toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
 }
 
-function PropertyAccessPicker({ headingId, properties, selectedSet, onToggleId }) {
-  const n = properties.length;
-  const sel = selectedSet.size;
+function PropertyAccessTree({ headingId, properties, selectedSet, onChange }) {
+  const [expanded, setExpanded] = useState(() => new Set());
+  const [search, setSearch] = useState("");
+
+  const grouped = useMemo(() => {
+    const regions = new Map();
+    for (const p of properties) {
+      const rid = p.regionId ?? `name:${p.regionName}`;
+      const pid = p.portfolioId ?? `name:${p.portfolioName}`;
+      if (!regions.has(rid)) {
+        regions.set(rid, { id: rid, name: p.regionName || "—", portfolios: new Map() });
+      }
+      const r = regions.get(rid);
+      if (!r.portfolios.has(pid)) {
+        r.portfolios.set(pid, { id: pid, name: p.portfolioName || "—", properties: [] });
+      }
+      r.portfolios.get(pid).properties.push(p);
+    }
+    return [...regions.values()].map((r) => ({
+      ...r,
+      portfolios: [...r.portfolios.values()]
+    }));
+  }, [properties]);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return grouped;
+    return grouped
+      .map((r) => ({
+        ...r,
+        portfolios: r.portfolios
+          .map((pf) => {
+            const rMatch = r.name.toLowerCase().includes(q);
+            const pfMatch = pf.name.toLowerCase().includes(q);
+            const items =
+              rMatch || pfMatch
+                ? pf.properties
+                : pf.properties.filter((p) => p.name.toLowerCase().includes(q));
+            return { ...pf, properties: items };
+          })
+          .filter((pf) => pf.properties.length > 0)
+      }))
+      .filter((r) => r.portfolios.length > 0);
+  }, [grouped, search]);
+
+  const totalCount = properties.length;
+  const selCount = selectedSet.size;
+  const searching = search.trim().length > 0;
+
+  function commit(next) {
+    onChange(next);
+  }
+
+  function toggleId(id) {
+    const next = new Set(selectedSet);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    commit(next);
+  }
+
+  function setMany(ids, on) {
+    const next = new Set(selectedSet);
+    for (const id of ids) {
+      if (on) next.add(id);
+      else next.delete(id);
+    }
+    commit(next);
+  }
+
+  function selectAll() {
+    commit(new Set(properties.map((p) => p.id)));
+  }
+
+  function clearAll() {
+    commit(new Set());
+  }
+
+  function toggleExpanded(rid) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(rid)) next.delete(rid);
+      else next.add(rid);
+      return next;
+    });
+  }
+
   return (
-    <div className="admin-prop-picker" role="group" aria-labelledby={headingId}>
-      <div className="admin-prop-picker__head">
-        <div className="admin-prop-picker__head-text">
-          <h3 id={headingId} className="admin-prop-picker__title">
-            <Layers size={22} strokeWidth={2} className="admin-prop-picker__title-icon" aria-hidden />
+    <div className="prop-tree" role="group" aria-labelledby={headingId}>
+      <div className="prop-tree__head">
+        <div className="prop-tree__head-text">
+          <h3 id={headingId} className="prop-tree__title">
+            <Layers size={20} strokeWidth={2} aria-hidden />
             Property access
           </h3>
-          <p className="admin-prop-picker__hint">Choose at least one property. This controls which units and reports they can open.</p>
+          <p className="prop-tree__hint">
+            Pick by region, portfolio, or individual property. The user can access whatever you select.
+          </p>
         </div>
-        {n > 0 ? (
-          <span className="admin-prop-picker__badge" aria-live="polite">
-            {sel} selected
-          </span>
-        ) : null}
+        <span className="prop-tree__badge" aria-live="polite">
+          <strong>{selCount}</strong>
+          <span className="prop-tree__badge-divider">/</span>
+          {totalCount}
+          <span className="prop-tree__badge-label">selected</span>
+        </span>
       </div>
-      {n === 0 ? (
-        <div className="admin-prop-picker__empty">
-          <p className="admin-prop-picker__empty-title">No properties for this company yet.</p>
-          <p className="admin-prop-picker__empty-sub">
+
+      {totalCount > 0 ? (
+        <div className="prop-tree__toolbar">
+          <label className="prop-tree__search">
+            <Search size={15} strokeWidth={2.2} aria-hidden />
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search properties, portfolios, regions"
+              aria-label="Search property access"
+            />
+          </label>
+          <div className="prop-tree__bulk">
+            <button
+              type="button"
+              className="prop-tree__bulk-btn"
+              onClick={selectAll}
+              disabled={selCount === totalCount}
+            >
+              Select all
+            </button>
+            <button
+              type="button"
+              className="prop-tree__bulk-btn prop-tree__bulk-btn--ghost"
+              onClick={clearAll}
+              disabled={selCount === 0}
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {totalCount === 0 ? (
+        <div className="prop-tree__empty">
+          <p className="prop-tree__empty-title">No properties for this company yet.</p>
+          <p className="prop-tree__empty-sub">
             Add regions, portfolios, and properties in the Admin sections first, or pick another company above.
           </p>
         </div>
+      ) : filtered.length === 0 ? (
+        <div className="prop-tree__empty">
+          <p className="prop-tree__empty-title">No matches.</p>
+          <p className="prop-tree__empty-sub">Try a different search term.</p>
+        </div>
       ) : (
-        <ul className="admin-prop-picker__list">
-          {properties.map((p) => {
-            const on = selectedSet.has(p.id);
+        <div className="prop-tree__regions">
+          {filtered.map((r) => {
+            const rIds = r.portfolios.flatMap((pf) => pf.properties.map((p) => p.id));
+            const rSel = rIds.reduce((acc, id) => acc + (selectedSet.has(id) ? 1 : 0), 0);
+            const rAll = rIds.length > 0 && rSel === rIds.length;
+            const rSome = rSel > 0 && !rAll;
+            const isOpen = searching || expanded.has(r.id);
             return (
-              <li key={p.id}>
-                <label className={`admin-prop-picker__row${on ? " admin-prop-picker__row--on" : ""}`}>
-                  <input
-                    type="checkbox"
-                    className="admin-prop-picker__checkbox"
-                    checked={on}
-                    onChange={() => onToggleId(p.id)}
-                  />
-                  <span className="admin-prop-picker__text">
-                    <span className="admin-prop-picker__name">{p.name}</span>
-                    <span className="admin-prop-picker__sub">
-                      {p.regionName} · {p.portfolioName}
+              <section
+                key={r.id}
+                className={`prop-tree__region${isOpen ? " is-open" : ""}${rAll ? " is-all" : rSome ? " is-some" : ""}`}
+              >
+                <header className="prop-tree__region-head">
+                  <button
+                    type="button"
+                    className="prop-tree__region-toggle"
+                    onClick={() => toggleExpanded(r.id)}
+                    aria-expanded={isOpen}
+                    aria-controls={`region-${r.id}-body`}
+                  >
+                    <ChevronDown size={16} className="prop-tree__chev" aria-hidden />
+                    <span className="prop-tree__region-ico" aria-hidden>
+                      <MapPinned size={16} strokeWidth={2.2} />
                     </span>
-                  </span>
-                </label>
-              </li>
+                    <span className="prop-tree__region-name">{r.name}</span>
+                    <span className="prop-tree__counter">
+                      {rSel}/{rIds.length}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`prop-tree__pill${rAll ? " is-on" : rSome ? " is-some" : ""}`}
+                    onClick={() => setMany(rIds, !rAll)}
+                    aria-pressed={rAll}
+                    title={rAll ? "Deselect all in region" : "Select all in region"}
+                  >
+                    {rAll ? <Check size={13} strokeWidth={2.5} aria-hidden /> : null}
+                    {rAll ? "All in region" : rSome ? "Select rest" : "All in region"}
+                  </button>
+                </header>
+
+                {isOpen ? (
+                  <div className="prop-tree__portfolios" id={`region-${r.id}-body`}>
+                    {r.portfolios.map((pf) => {
+                      const pfIds = pf.properties.map((p) => p.id);
+                      const pfSel = pfIds.reduce(
+                        (acc, id) => acc + (selectedSet.has(id) ? 1 : 0),
+                        0
+                      );
+                      const pfAll = pfIds.length > 0 && pfSel === pfIds.length;
+                      const pfSome = pfSel > 0 && !pfAll;
+                      return (
+                        <div
+                          key={pf.id}
+                          className={`prop-tree__portfolio${pfAll ? " is-all" : pfSome ? " is-some" : ""}`}
+                        >
+                          <div className="prop-tree__portfolio-head">
+                            <span className="prop-tree__portfolio-name">
+                              <FolderKanban size={14} strokeWidth={2.2} aria-hidden />
+                              <span>{pf.name}</span>
+                              <span className="prop-tree__counter prop-tree__counter--sm">
+                                {pfSel}/{pfIds.length}
+                              </span>
+                            </span>
+                            <button
+                              type="button"
+                              className={`prop-tree__pill prop-tree__pill--sm${
+                                pfAll ? " is-on" : pfSome ? " is-some" : ""
+                              }`}
+                              onClick={() => setMany(pfIds, !pfAll)}
+                              aria-pressed={pfAll}
+                            >
+                              {pfAll ? (
+                                <>
+                                  <Check size={12} strokeWidth={2.5} aria-hidden />
+                                  Selected
+                                </>
+                              ) : pfSome ? (
+                                "Select rest"
+                              ) : (
+                                "Select all"
+                              )}
+                            </button>
+                          </div>
+                          <ul className="prop-tree__chips">
+                            {pf.properties.map((p) => {
+                              const on = selectedSet.has(p.id);
+                              return (
+                                <li key={p.id}>
+                                  <button
+                                    type="button"
+                                    className={`prop-tree__chip${on ? " is-on" : ""}`}
+                                    onClick={() => toggleId(p.id)}
+                                    aria-pressed={on}
+                                  >
+                                    <span className="prop-tree__chip-tick" aria-hidden>
+                                      {on ? <Check size={12} strokeWidth={2.8} /> : null}
+                                    </span>
+                                    <span className="prop-tree__chip-name">{p.name}</span>
+                                  </button>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </section>
             );
           })}
-        </ul>
+        </div>
       )}
     </div>
   );
@@ -164,7 +404,20 @@ export default function AdminUsersPanel({ isSuperAdmin, workspaceCompanyId, comp
     setInviteMsg("");
     setInviteLinkUrl("");
     try {
-      const msAcc = await getActiveMsAccount();
+      let msAcc = await getActiveMsAccount();
+      if (!msAcc && isMicrosoftMailConfigured()) {
+        setInviteMsg("Please sign in with Microsoft to send the invitation from your mailbox...");
+        try {
+          await loginMicrosoft();
+        } catch (e) {
+          const msg = e?.message || "Microsoft sign-in was cancelled or failed.";
+          throw new Error(`Microsoft sign-in required before sending invite email. ${msg}`);
+        }
+        msAcc = await getActiveMsAccount();
+        if (!msAcc) {
+          throw new Error("Microsoft sign-in did not complete. Please try Send invitation again.");
+        }
+      }
       const preferMailboxDelivery = Boolean(msAcc);
 
       const res = await api.postAuthInvite({
@@ -177,14 +430,29 @@ export default function AdminUsersPanel({ isSuperAdmin, workspaceCompanyId, comp
 
       let graphSent = false;
       let graphErr = "";
-      if (preferMailboxDelivery && res.graphInvite?.html) {
+      const inviteSubject = res.graphInvite?.subject || "Invitation";
+      const inviteHtml = res.graphInvite?.html || "";
+      const previewText = inviteHtml ? plainTextFromHtml(inviteHtml, 1900) : null;
+      if (preferMailboxDelivery && inviteHtml) {
         try {
-          await sendOutlookHtmlMail({
+          const meta = await sendOutlookHtmlMail({
             to: email,
-            htmlDocument: res.graphInvite.html,
-            subject: res.graphInvite.subject || "Invitation"
+            htmlDocument: inviteHtml,
+            subject: inviteSubject
           });
           graphSent = true;
+          await logInviteEmail({
+            type: "invite",
+            senderMailbox: msAcc?.username || "outlook",
+            toEmail: email,
+            subject: inviteSubject,
+            graphMessageId: meta.graphMessageId,
+            graphConversationId: meta.graphConversationId || "",
+            sentAt: meta.sentAt,
+            tenantLabel: null,
+            propertyName: null,
+            bodyPreview: previewText
+          });
         } catch (e) {
           graphErr = e?.message || String(e);
         }
@@ -196,6 +464,18 @@ export default function AdminUsersPanel({ isSuperAdmin, workspaceCompanyId, comp
         );
         setInviteLinkUrl("");
       } else if (res.emailed) {
+        await logInviteEmail({
+          type: "invite",
+          senderMailbox: res.smtpFrom || "smtp",
+          toEmail: email,
+          subject: inviteSubject,
+          graphMessageId: "",
+          graphConversationId: "",
+          sentAt: new Date().toISOString(),
+          tenantLabel: null,
+          propertyName: null,
+          bodyPreview: previewText
+        });
         setInviteMsg(
           "Invitation sent from the server (SMTP). They should open the email, set a password, then sign in here."
         );
@@ -225,6 +505,11 @@ export default function AdminUsersPanel({ isSuperAdmin, workspaceCompanyId, comp
       setInviteEmail("");
       setSelProps(new Set());
       await loadUsers();
+      /** Close the modal only when an email actually went out; keep it open when the admin still
+       * needs to copy the password link (no email path). */
+      if (graphSent || res.emailed) {
+        setInviteOpen(false);
+      }
     } catch (e) {
       setInviteMsg(e.message || "Invite failed");
     } finally {
@@ -253,13 +538,6 @@ export default function AdminUsersPanel({ isSuperAdmin, workspaceCompanyId, comp
     } finally {
       setEditBusy(false);
     }
-  }
-
-  function toggleProp(id, setFn, cur) {
-    const next = new Set(cur);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    setFn(next);
   }
 
   return (
@@ -305,7 +583,17 @@ export default function AdminUsersPanel({ isSuperAdmin, workspaceCompanyId, comp
                   <td className="text-muted" style={{ whiteSpace: "nowrap", fontSize: "0.85rem" }}>
                     {formatAuthInstant(u.lastLoginAt)}
                   </td>
-                  <td>{u.disabled ? <span style={{ color: "var(--color-danger)" }}>No</span> : "Yes"}</td>
+                  <td>
+                    {u.invitationPending ? (
+                      <span className="admin-users-panel__status admin-users-panel__status--pending">
+                        Pending invite
+                      </span>
+                    ) : u.active ? (
+                      <span className="admin-users-panel__status admin-users-panel__status--active">Yes</span>
+                    ) : (
+                      <span className="admin-users-panel__status admin-users-panel__status--inactive">No</span>
+                    )}
+                  </td>
                   <td>
                     <button type="button" className="btn btn-ghost btn-sm" title="Edit access" onClick={() => openEdit(u)}>
                       <Pencil size={16} />
@@ -391,11 +679,11 @@ export default function AdminUsersPanel({ isSuperAdmin, workspaceCompanyId, comp
                 </select>
               </div>
               {inviteRole === "member" ? (
-                <PropertyAccessPicker
+                <PropertyAccessTree
                   headingId="admin-invite-prop-access"
                   properties={inviteProps}
                   selectedSet={selProps}
-                  onToggleId={(id) => toggleProp(id, setSelProps, selProps)}
+                  onChange={setSelProps}
                 />
               ) : null}
               {inviteMsg ? <p className="auth-modal__msg text-muted">{inviteMsg}</p> : null}
@@ -467,11 +755,11 @@ export default function AdminUsersPanel({ isSuperAdmin, workspaceCompanyId, comp
                 </select>
               </div>
               {editRole === "member" ? (
-                <PropertyAccessPicker
+                <PropertyAccessTree
                   headingId="admin-edit-prop-access"
                   properties={inviteProps}
                   selectedSet={editSel}
-                  onToggleId={(id) => toggleProp(id, setEditSel, editSel)}
+                  onChange={setEditSel}
                 />
               ) : null}
             </div>

@@ -51,6 +51,41 @@ async function getCompanyName(companyId) {
   return row ? String(row.Name ?? row.name ?? "").trim() : "";
 }
 
+async function consumePendingInvitation(email, companyId) {
+  try {
+    await query(
+      `UPDATE dbo.UserInvitation
+       SET ConsumedAt = SYSUTCDATETIME()
+       WHERE Email = @email
+         AND CompanyId = @companyId
+         AND ConsumedAt IS NULL`,
+      {
+        email: { type: sql.NVarChar(320), value: normEmail(email) },
+        companyId: { type: sql.Int, value: companyId }
+      }
+    );
+  } catch (e) {
+    if (/Invalid object name/i.test(String(e?.message || ""))) return;
+    throw e;
+  }
+}
+
+async function getPendingInvitationEmailSet(companyId) {
+  try {
+    const result = await query(
+      `SELECT Email
+       FROM dbo.UserInvitation
+       WHERE CompanyId = @companyId
+         AND ConsumedAt IS NULL`,
+      { companyId: { type: sql.Int, value: companyId } }
+    );
+    return new Set((result.recordset || []).map((r) => normEmail(r.Email ?? r.email)).filter(Boolean));
+  } catch (e) {
+    if (/Invalid object name/i.test(String(e?.message || ""))) return new Set();
+    throw e;
+  }
+}
+
 function readClaimsFromDecoded(decoded) {
   if (!decoded || typeof decoded !== "object") {
     return { role: null, companyId: null, propertyIds: [] };
@@ -127,6 +162,8 @@ async function buildTenantContext(decoded) {
     allowedPropertyNames = null;
   }
 
+  await consumePendingInvitation(email, companyId);
+
   return {
     userId: uid,
     firebaseUid: uid,
@@ -170,6 +207,7 @@ function mapAuthUserRecord(u) {
 
 async function listUsersForCompany(companyId) {
   const auth = getFirebaseAuth();
+  const pendingInvites = await getPendingInvitationEmailSet(companyId);
   const out = [];
   let pageToken;
   do {
@@ -179,7 +217,13 @@ async function listUsersForCompany(companyId) {
       if (!c.ctRole) continue;
       const cid = Number(c.ctCompanyId);
       if (cid === Number(companyId)) {
-        out.push(mapAuthUserRecord(u));
+        const row = mapAuthUserRecord(u);
+        const pendingInvitation = pendingInvites.has(normEmail(row.email));
+        out.push({
+          ...row,
+          invitationPending: pendingInvitation,
+          active: row.disabled !== true && !pendingInvitation
+        });
       }
     }
     pageToken = result.pageToken;

@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useState } from "react";
-import { ArrowLeft, ChevronDown, ChevronRight, Mail } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { ChevronDown, ChevronRight, Mail } from "lucide-react";
 import { api } from "../api/apiClient";
+import PageHeader from "../components/PageHeader";
 import Spinner from "../components/Spinner";
 import {
   fetchReminderRepliesInThread,
@@ -20,7 +20,6 @@ function formatWhen(iso) {
 }
 
 export default function ReminderEmailHistoryPage() {
-  const navigate = useNavigate();
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [listErr, setListErr] = useState("");
@@ -113,18 +112,11 @@ export default function ReminderEmailHistoryPage() {
 
   return (
     <div className="page reminder-email-history">
-      <button type="button" className="btn btn-ghost" onClick={() => navigate(-1)} style={{ marginBottom: "0.75rem" }}>
-        <ArrowLeft size={18} />
-        Back
-      </button>
-
-      <h1 className="page-title">
-        <Mail size={22} style={{ verticalAlign: "text-top", marginRight: "0.35rem" }} aria-hidden />
-        Sent payment reminders
-      </h1>
+      <PageHeader title="Sent emails" icon={<Mail size={20} strokeWidth={2.2} />} backTo={-1} />
       <p className="text-muted reminder-email-history__intro">
-        Logged sends from this app (per company). Expand a row to load <strong>replies</strong> from your Outlook Inbox
-        via Microsoft Graph — use the same account you signed in with in the toolbar.
+        Logged sends from this app (per company). Includes payment reminders and user invitations. Expand a reminder
+        row to load <strong>replies</strong> from your Outlook Inbox via Microsoft Graph — use the same account you
+        signed in with in the toolbar.
       </p>
 
       {loading ? (
@@ -142,7 +134,7 @@ export default function ReminderEmailHistoryPage() {
         </div>
       ) : entries.length === 0 ? (
         <div className="card reminder-email-history__card">
-          <p className="text-muted">No reminder emails have been logged yet. Send one from Property details.</p>
+          <p className="text-muted">No emails have been logged yet. Send a payment reminder from Property details, or invite a user from Admin.</p>
         </div>
       ) : (
         <div className="table-wrap table-wrap--report reminder-email-history__wrap">
@@ -150,6 +142,7 @@ export default function ReminderEmailHistoryPage() {
             <thead>
               <tr>
                 <th className="reminder-email-history__col-toggle" aria-label="Expand" />
+                <th>Type</th>
                 <th>Sent</th>
                 <th>To</th>
                 <th>Tenant / unit</th>
@@ -162,18 +155,29 @@ export default function ReminderEmailHistoryPage() {
               {entries.map((e) => {
                 const open = expanded.has(e.id);
                 const rs = repliesById[e.id];
+                const isInvite = e.type === "invite";
+                const canExpand = !isInvite;
                 return (
                   <Fragment key={e.id}>
                     <tr className={open ? "reminder-email-history__row-open" : ""}>
                       <td>
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-sm reminder-email-history__expand"
-                          aria-expanded={open}
-                          onClick={() => void toggleReplies(e)}
+                        {canExpand ? (
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm reminder-email-history__expand"
+                            aria-expanded={open}
+                            onClick={() => void toggleReplies(e)}
+                          >
+                            {open ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+                          </button>
+                        ) : null}
+                      </td>
+                      <td>
+                        <span
+                          className={`email-type-badge email-type-badge--${isInvite ? "invite" : "reminder"}`}
                         >
-                          {open ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
-                        </button>
+                          {isInvite ? "Invite" : "Reminder"}
+                        </span>
                       </td>
                       <td>{formatWhen(e.sentAt)}</td>
                       <td className="reminder-email-history__mono">{e.toEmail}</td>
@@ -182,9 +186,9 @@ export default function ReminderEmailHistoryPage() {
                       <td className="reminder-email-history__mono">{e.senderMailbox}</td>
                       <td>{e.subject || "—"}</td>
                     </tr>
-                    {open ? (
+                    {open && canExpand ? (
                       <tr className="reminder-email-history__detail-row">
-                        <td colSpan={7}>
+                        <td colSpan={8}>
                           <div className="reminder-email-history__detail">
                             <div className="reminder-email-history__preview">
                               <strong>Preview (sent)</strong>

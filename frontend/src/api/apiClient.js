@@ -162,6 +162,24 @@ export const api = {
 
   getDashboardUnitLegalHistory: (query) => request("GET", "/dashboard/unit-legal-history", { query }),
 
+  /* Legal cases (multi-case workflow per tenant) */
+  getDashboardLegalCases: (query) =>
+    request("GET", "/dashboard/unit-legal-cases", { query }),
+  postDashboardLegalCase: (body) =>
+    request("POST", "/dashboard/unit-legal-cases", { body }),
+  patchDashboardLegalCase: (id, body) =>
+    request("PATCH", `/dashboard/unit-legal-cases/${id}`, { body }),
+  deleteDashboardLegalCase: (id) =>
+    request("DELETE", `/dashboard/unit-legal-cases/${id}`),
+  getDashboardLegalCaseStatuses: (id) =>
+    request("GET", `/dashboard/unit-legal-cases/${id}/statuses`),
+  postDashboardLegalCaseStatus: (id, body) =>
+    request("POST", `/dashboard/unit-legal-cases/${id}/statuses`, { body }),
+  deleteDashboardLegalCaseStatus: (statusId) =>
+    request("DELETE", `/dashboard/unit-legal-case-statuses/${statusId}`),
+  getDashboardPropertyLegalStatusOptions: (property) =>
+    request("GET", "/dashboard/property-legal-status-options", { query: { property } }),
+
   getAdminRegions: () => request("GET", "/admin/regions"),
   postAdminRegion: (name) => request("POST", "/admin/regions", { body: { name } }),
   putAdminRegion: (id, name) => request("PUT", `/admin/regions/${id}`, { body: { name } }),
@@ -188,5 +206,22 @@ export const api = {
   getAdminPropertyListNames: () => request("GET", "/admin/property-list-names"),
 
   getAdminReminderEmailLog: () => request("GET", "/admin/reminder-email-log"),
-  postAdminReminderEmailLog: (body) => request("POST", "/admin/reminder-email-log", { body })
+  postAdminReminderEmailLog: (body) => request("POST", "/admin/reminder-email-log", { body }),
+
+  /* Admin: legal-status preset lists (properties select one by ListName) */
+  getAdminLegalStatusPresetLists: () => request("GET", "/admin/legal-status-preset-lists"),
+  postAdminLegalStatusPresetList: (name) =>
+    request("POST", "/admin/legal-status-preset-lists", { body: { name } }),
+  putAdminLegalStatusPresetList: (listId, body) =>
+    request("PUT", `/admin/legal-status-preset-lists/${listId}`, { body }),
+  deleteAdminLegalStatusPresetList: (listId) =>
+    request("DELETE", `/admin/legal-status-preset-lists/${listId}`),
+  getAdminLegalStatusPresetOptions: (listId) =>
+    request("GET", `/admin/legal-status-preset-lists/${listId}/options`),
+  postAdminLegalStatusPresetOption: (listId, body) =>
+    request("POST", `/admin/legal-status-preset-lists/${listId}/options`, { body }),
+  putAdminLegalStatusPresetOption: (listId, id, body) =>
+    request("PUT", `/admin/legal-status-preset-lists/${listId}/options/${id}`, { body }),
+  deleteAdminLegalStatusPresetOption: (listId, id) =>
+    request("DELETE", `/admin/legal-status-preset-lists/${listId}/options/${id}`)
 };

@@ -91,8 +91,14 @@ async function acquireGraphAccessToken() {
   }
 }
 
-async function graphReadJson(url, token) {
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+async function graphReadJson(url, token, extraHeaders = null) {
+  const headers = { Authorization: `Bearer ${token}` };
+  if (extraHeaders && typeof extraHeaders === "object") {
+    for (const [k, v] of Object.entries(extraHeaders)) {
+      if (v != null) headers[k] = String(v);
+    }
+  }
+  const res = await fetch(url, { headers });
   const text = await res.text();
   let j = null;
   if (text) {
@@ -107,6 +113,41 @@ async function graphReadJson(url, token) {
     throw new Error(msg);
   }
   return j;
+}
+
+/**
+ * Returns the signed-in Microsoft user's contact card.
+ * Used to fill the sender name / phone in tenant emails so each admin sends with their own signature.
+ * Falls back to null when no MS account is signed in or Graph denies the call.
+ * @returns {Promise<null | { displayName: string; email: string; phone: string }>}
+ */
+export async function getMyOutlookContact() {
+  const app = await getMsalInstance();
+  if (!app) return null;
+  const account = app.getActiveAccount() || app.getAllAccounts()[0];
+  if (!account) return null;
+  let token;
+  try {
+    token = await acquireGraphAccessToken();
+  } catch {
+    return null;
+  }
+  try {
+    const j = await graphReadJson(
+      "https://graph.microsoft.com/v1.0/me?$select=displayName,mail,userPrincipalName,mobilePhone,businessPhones",
+      token
+    );
+    const displayName = String(j?.displayName ?? "").trim();
+    const email = String(j?.mail ?? j?.userPrincipalName ?? "").trim();
+    const mobile = String(j?.mobilePhone ?? "").trim();
+    const business = Array.isArray(j?.businessPhones) && j.businessPhones.length > 0
+      ? String(j.businessPhones[0] ?? "").trim()
+      : "";
+    const phone = mobile || business;
+    return { displayName, email, phone };
+  } catch {
+    return null;
+  }
 }
 
 /** Mail + UPN + smtp: proxy addresses — so we skip our own sent copies even when From uses an alias. */
@@ -263,8 +304,11 @@ export async function sendReminderEmail({ to, htmlDocument, subject, comment }) 
 async function graphListMessagesByConversationId(token, conversationId) {
   const convEsc = String(conversationId).replace(/'/g, "''");
   const filt = `conversationId eq '${convEsc}'`;
+  // `uniqueBody` returns only the parts of the body unique to this message — no quoted history.
   const select =
-    "id,subject,from,receivedDateTime,sentDateTime,bodyPreview,isRead,parentFolderId";
+    "id,subject,from,receivedDateTime,sentDateTime,bodyPreview,uniqueBody,isRead,parentFolderId";
+  // Ask Graph to return uniqueBody/body as plain text so we don't have to strip HTML.
+  const preferTextHeader = { Prefer: 'outlook.body-content-type="text"' };
   const tries = [
     `https://graph.microsoft.com/v1.0/me/messages?$filter=${encodeURIComponent(filt)}&$top=50&$select=${encodeURIComponent(select)}&$orderby=${encodeURIComponent("receivedDateTime asc")}`,
     `https://graph.microsoft.com/v1.0/me/messages?$filter=${encodeURIComponent(filt)}&$top=50&$select=${encodeURIComponent(select)}`,
@@ -273,7 +317,7 @@ async function graphListMessagesByConversationId(token, conversationId) {
   ];
   for (const url of tries) {
     try {
-      const data = await graphReadJson(url, token);
+      const data = await graphReadJson(url, token, preferTextHeader);
       if (Array.isArray(data?.value) && data.value.length > 0) return data.value;
     } catch (e) {
       console.warn("Graph conversation list attempt failed:", e?.message || e);
@@ -331,7 +375,70 @@ export async function fetchReminderRepliesInThread({
       from: m.from?.emailAddress?.address || "",
       fromName: m.from?.emailAddress?.name || "",
       receivedAt: m.receivedDateTime || m.sentDateTime || "",
-      preview: m.bodyPreview || "",
+      preview: extractReplyOnlyText(m),
       isRead: Boolean(m.isRead)
     }));
+}
+
+/**
+ * Pull only the new content of a reply — drop the quoted body of the previous email(s).
+ * Prefers Graph's `uniqueBody` (already stripped by the server when available),
+ * then falls back to `bodyPreview` with a best-effort client-side trim.
+ */
+function extractReplyOnlyText(m) {
+  const unique = String(m?.uniqueBody?.content ?? "").trim();
+  if (unique) {
+    const ct = String(m?.uniqueBody?.contentType ?? "").toLowerCase();
+    const plain = ct === "html" ? htmlToPlainText(unique) : unique;
+    const cleaned = sanitizeReplyText(plain);
+    if (cleaned) return cleaned;
+  }
+  const preview = String(m?.bodyPreview ?? "").trim();
+  return sanitizeReplyText(preview);
+}
+
+/** Trim quoted history, then strip inline-image cid tokens and bare email addresses. */
+function sanitizeReplyText(text) {
+  let s = trimQuotedHistory(text);
+  if (!s) return "";
+  // Remove inline-image references like `[cid:abc-123]` (case-insensitive).
+  s = s.replace(/\[cid:[^\]]*\]/gi, " ");
+  // Remove bare email addresses (typically auto-added signature lines).
+  s = s.replace(/\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b/g, " ");
+  // Collapse any extra whitespace that the removals left behind.
+  s = s.replace(/[ \t]+/g, " ").replace(/\s*\n\s*/g, "\n").replace(/\n{3,}/g, "\n\n");
+  return s.trim();
+}
+
+function htmlToPlainText(html) {
+  try {
+    const doc = new DOMParser().parseFromString(String(html), "text/html");
+    return (doc.body?.textContent || "").replace(/\u00a0/g, " ").trim();
+  } catch {
+    return String(html).replace(/<[^>]+>/g, " ").trim();
+  }
+}
+
+/**
+ * Best-effort removal of common "quoted original message" markers so the preview
+ * shows just what the replier actually wrote.
+ */
+function trimQuotedHistory(text) {
+  if (!text) return "";
+  let s = String(text).replace(/\r\n/g, "\n");
+  const cutPatterns = [
+    /\n-{2,}\s*Original Message\s*-{2,}/i,
+    /\nOn\s.+?wrote:\s*\n/i,
+    /\nFrom:\s.+\nSent:\s.+/i,
+    /\nFrom:\s.+\nDate:\s.+/i,
+    /\n_{5,}\n/,
+    /\n>{1}.*$/m
+  ];
+  for (const re of cutPatterns) {
+    const m = s.match(re);
+    if (m && typeof m.index === "number") {
+      s = s.slice(0, m.index);
+    }
+  }
+  return s.trim();
 }

@@ -80,6 +80,7 @@ BEGIN
   CREATE TABLE dbo.ReminderEmailLog (
     Id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
     CompanyId INT NOT NULL,
+    [Type] NVARCHAR(32) NOT NULL CONSTRAINT DF_ReminderEmailLog_Type DEFAULT N'reminder',
     SenderMailbox NVARCHAR(320) NOT NULL,
     ToEmail NVARCHAR(320) NOT NULL,
     Subject NVARCHAR(500) NULL,
@@ -89,7 +90,8 @@ BEGIN
     TenantLabel NVARCHAR(500) NULL,
     PropertyName NVARCHAR(500) NULL,
     BodyPreview NVARCHAR(2000) NULL,
-    CONSTRAINT FK_ReminderEmailLog_Companies FOREIGN KEY (CompanyId) REFERENCES dbo.Companies (Id)
+    CONSTRAINT FK_ReminderEmailLog_Companies FOREIGN KEY (CompanyId) REFERENCES dbo.Companies (Id),
+    CONSTRAINT CK_ReminderEmailLog_Type CHECK ([Type] IN (N'reminder', N'invite'))
   );
   CREATE INDEX IX_ReminderEmailLog_Company_SentAt ON dbo.ReminderEmailLog (CompanyId, SentAt DESC);
 END
@@ -132,6 +134,74 @@ BEGIN
     CONSTRAINT FK_UnitLegalStatusHistory_Companies FOREIGN KEY (CompanyId) REFERENCES dbo.Companies (Id)
   );
   CREATE INDEX IX_UnitLegalStatusHistory_Lookup ON dbo.UnitLegalStatusHistory (CompanyId, PropertyName, Unit, TenantName, ChangedAt DESC);
+END
+GO
+
+-- Legal status preset lists are GLOBAL (shared across all companies).
+-- Each property still picks its own list via Properties.ListName.
+IF OBJECT_ID(N'dbo.LegalStatusPresetList', N'U') IS NULL
+BEGIN
+  CREATE TABLE dbo.LegalStatusPresetList (
+    Id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+    Name NVARCHAR(100) NOT NULL,
+    CreatedAt DATETIME2 NOT NULL CONSTRAINT DF_LegalStatusPresetList_CreatedAt DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT UQ_LegalStatusPresetList_Name UNIQUE (Name)
+  );
+END
+GO
+
+IF OBJECT_ID(N'dbo.LegalStatusPresetOption', N'U') IS NULL
+BEGIN
+  CREATE TABLE dbo.LegalStatusPresetOption (
+    Id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+    ListId INT NOT NULL,
+    Status NVARCHAR(200) NOT NULL,
+    SortOrder INT NOT NULL CONSTRAINT DF_LegalStatusPresetOption_SortOrder DEFAULT 0,
+    CreatedAt DATETIME2 NOT NULL CONSTRAINT DF_LegalStatusPresetOption_CreatedAt DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT FK_LegalStatusPresetOption_List FOREIGN KEY (ListId) REFERENCES dbo.LegalStatusPresetList (Id) ON DELETE CASCADE,
+    CONSTRAINT UQ_LegalStatusPresetOption_ListStatus UNIQUE (ListId, Status)
+  );
+  CREATE INDEX IX_LegalStatusPresetOption_List ON dbo.LegalStatusPresetOption (ListId, SortOrder, Id);
+END
+GO
+
+IF OBJECT_ID(N'dbo.UnitLegalCase', N'U') IS NULL
+BEGIN
+  CREATE TABLE dbo.UnitLegalCase (
+    Id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+    CompanyId INT NOT NULL,
+    PropertyName NVARCHAR(400) NOT NULL,
+    Unit NVARCHAR(400) NOT NULL,
+    TenantName NVARCHAR(400) NOT NULL,
+    TenantCode NVARCHAR(200) NULL,
+    OpenYear SMALLINT NOT NULL,
+    OpenMonth TINYINT NOT NULL,
+    InitialNote NVARCHAR(MAX) NULL,
+    FollowUpAt DATETIME2 NULL,
+    IsClosed BIT NOT NULL CONSTRAINT DF_UnitLegalCase_IsClosed DEFAULT 0,
+    ClosedAt DATETIME2 NULL,
+    CreatedAt DATETIME2 NOT NULL CONSTRAINT DF_UnitLegalCase_CreatedAt DEFAULT SYSUTCDATETIME(),
+    CreatedByName NVARCHAR(256) NULL,
+    CONSTRAINT FK_UnitLegalCase_Companies FOREIGN KEY (CompanyId) REFERENCES dbo.Companies (Id),
+    CONSTRAINT CK_UnitLegalCase_OpenMonth CHECK (OpenMonth BETWEEN 1 AND 12),
+    CONSTRAINT CK_UnitLegalCase_OpenYear CHECK (OpenYear BETWEEN 1900 AND 9999)
+  );
+  CREATE INDEX IX_UnitLegalCase_Lookup ON dbo.UnitLegalCase (CompanyId, PropertyName, Unit, TenantName, IsClosed, CreatedAt DESC);
+END
+GO
+
+IF OBJECT_ID(N'dbo.UnitLegalCaseStatus', N'U') IS NULL
+BEGIN
+  CREATE TABLE dbo.UnitLegalCaseStatus (
+    Id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+    CaseId INT NOT NULL,
+    Status NVARCHAR(200) NOT NULL,
+    Note NVARCHAR(MAX) NULL,
+    ChangedAt DATETIME2 NOT NULL CONSTRAINT DF_UnitLegalCaseStatus_ChangedAt DEFAULT SYSUTCDATETIME(),
+    CreatedByName NVARCHAR(256) NULL,
+    CONSTRAINT FK_UnitLegalCaseStatus_Case FOREIGN KEY (CaseId) REFERENCES dbo.UnitLegalCase (Id) ON DELETE CASCADE
+  );
+  CREATE INDEX IX_UnitLegalCaseStatus_Case ON dbo.UnitLegalCaseStatus (CaseId, ChangedAt DESC);
 END
 GO
 
