@@ -869,6 +869,62 @@ table.data-table tbody tr:hover {
   line-height: 1.35;
 }
 
+.data-table-unit-detail .unit-detail-legal-status {
+  vertical-align: top;
+  min-width: 7rem;
+  max-width: 18rem;
+}
+
+.ud-legal-status-cell {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+  line-height: 1.25;
+}
+
+.ud-legal-status-cell__text {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-text);
+  word-break: break-word;
+}
+
+.ud-legal-status-cell__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 1.35rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1.25;
+  white-space: nowrap;
+  color: #fff;
+  background: linear-gradient(135deg, #fbbf24 0%, #fb923c 45%, #ea580c 100%);
+  border: 1px solid rgba(234, 88, 12, 0.55);
+  box-shadow:
+    0 1px 2px rgba(124, 45, 18, 0.18),
+    0 0 0 1px rgba(255, 255, 255, 0.35) inset;
+  text-shadow: 0 1px 1px rgba(124, 45, 18, 0.35);
+}
+
+.ud-legal-status-cell--compact .ud-legal-status-cell__text {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--color-primary-dark);
+}
+
+.ud-legal-status-cell--compact .ud-legal-status-cell__badge {
+  font-size: 0.66rem;
+  min-height: 1.4rem;
+  padding: 0.22rem 0.58rem;
+}
+
 /* Note column should claim more horizontal space than the other text columns. */
 .data-table-unit-detail th.th-col-note {
   min-width: 17.6rem;
@@ -4635,7 +4691,8 @@ select.auth-field__input {
 
 .ud-row-modal {
   width: min(1480px, 100%);
-  max-height: min(94vh, 980px);
+  max-height: min(96vh, 1040px);
+  min-height: min(82vh, 760px);
   display: flex;
   flex-direction: column;
   border-radius: 18px;
@@ -4645,6 +4702,13 @@ select.auth-field__input {
   box-shadow:
     0 24px 48px rgba(15, 23, 42, 0.18),
     0 0 0 1px rgba(255, 255, 255, 0.5) inset;
+}
+
+@media (max-width: 960px) {
+  .ud-row-modal {
+    min-height: 0;
+    max-height: min(94vh, 980px);
+  }
 }
 
 .ud-row-modal__top {
@@ -4708,6 +4772,10 @@ select.auth-field__input {
   .ud-row-modal__grid {
     grid-template-columns: 1fr;
     max-height: none;
+  }
+
+  .ud-row-modal__scrollbox--notes {
+    min-height: 12rem;
   }
 }
 
@@ -4839,6 +4907,10 @@ select.auth-field__input {
   font-size: 0.8rem;
 }
 
+.ud-row-modal__current-legal-value {
+  margin-top: 0.1rem;
+}
+
 .ud-row-modal__quick-btns {
   display: flex;
   gap: 0.5rem;
@@ -4899,7 +4971,10 @@ select.auth-field__input {
 }
 
 .ud-row-modal__scrollbox--notes {
-  max-height: 280px;
+  flex: 1 1 auto;
+  min-height: min(42vh, 360px);
+  max-height: none;
+  padding: 0.4rem 0.5rem;
 }
 
 .ud-row-modal__saved-notes-head {
@@ -5031,9 +5106,9 @@ select.auth-field__input {
 }
 
 .ud-row-modal__note {
-  padding: 0.55rem 0.6rem;
-  border-radius: 10px;
-  margin-bottom: 0.45rem;
+  padding: 0.32rem 0.45rem;
+  border-radius: 8px;
+  margin-bottom: 0.28rem;
   background: #f8fafc;
   border: 1px solid rgba(15, 23, 42, 0.06);
 }
@@ -5068,13 +5143,13 @@ select.auth-field__input {
 .ud-row-modal__note-kind-badge {
   display: inline-flex;
   align-items: center;
-  font-size: 0.62rem;
+  font-size: 0.58rem;
   font-weight: 800;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  padding: 0.15rem 0.4rem;
+  padding: 0.1rem 0.32rem;
   border-radius: 999px;
-  line-height: 1.2;
+  line-height: 1.15;
 }
 
 .ud-row-modal__note-kind-badge--auto {
@@ -5093,7 +5168,7 @@ select.auth-field__input {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 0.5rem;
+  gap: 0.35rem;
 }
 
 .ud-row-modal__note-meta {
@@ -5104,14 +5179,14 @@ select.auth-field__input {
 }
 
 .ud-row-modal__note-meta time {
-  font-size: 0.72rem;
+  font-size: 0.68rem;
 }
 
 .ud-row-modal__note-author {
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   font-weight: 600;
   color: var(--color-primary-dark);
-  line-height: 1.25;
+  line-height: 1.2;
   word-break: break-word;
 }
 
@@ -5132,11 +5207,11 @@ select.auth-field__input {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.55rem;
-  height: 1.55rem;
+  width: 1.4rem;
+  height: 1.4rem;
   padding: 0;
   border: none;
-  border-radius: 6px;
+  border-radius: 5px;
   background: rgba(15, 23, 42, 0.05);
   cursor: pointer;
   color: var(--color-muted);
@@ -5204,20 +5279,20 @@ select.auth-field__input {
 }
 
 .ud-row-modal__note-body {
-  margin: 0.35rem 0 0;
-  font-size: 0.82rem;
-  line-height: 1.45;
+  margin: 0.2rem 0 0;
+  font-size: 0.76rem;
+  line-height: 1.32;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
 .ud-row-modal__note-edit-input {
   width: 100%;
-  margin-top: 0.4rem;
+  margin-top: 0.28rem;
   resize: vertical;
-  min-height: 3.5rem;
-  font-size: 0.82rem;
-  padding: 0.45rem 0.5rem;
+  min-height: 3rem;
+  font-size: 0.78rem;
+  padding: 0.35rem 0.45rem;
   border-radius: 8px;
   border: 1px solid rgba(23, 111, 90, 0.25);
   font-family: inherit;
@@ -5264,6 +5339,218 @@ select.auth-field__input {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
   gap: 0.45rem;
+}
+
+.ud-cases__new-row--2 {
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+}
+
+.ud-cases__period-wrap {
+  position: relative;
+}
+
+.ud-cases__range-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.36rem 0.5rem;
+  border: 1px solid rgba(23, 111, 90, 0.28);
+  border-radius: 7px;
+  background: #fff;
+  font: inherit;
+  font-size: 0.82rem;
+  color: var(--color-text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.ud-cases__range-trigger:hover:not(:disabled) {
+  border-color: rgba(23, 111, 90, 0.45);
+}
+
+.ud-cases__range-trigger:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.ud-cases__range-trigger-text {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  color: var(--color-primary-dark);
+}
+
+.ud-cases__range-trigger-chev {
+  flex-shrink: 0;
+  color: rgba(23, 111, 90, 0.75);
+}
+
+.ud-monthcal-portal {
+  filter: drop-shadow(0 10px 28px rgba(15, 23, 42, 0.14));
+}
+
+.ud-monthcal {
+  background: #fff;
+  border: 1px solid rgba(23, 111, 90, 0.2);
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.ud-monthcal__chrome {
+  display: flex;
+  align-items: stretch;
+  gap: 0.45rem;
+  padding: 0.65rem 0.5rem 0.7rem;
+  background: linear-gradient(180deg, #f8faf9 0%, #f1f5f4 100%);
+}
+
+.ud-monthcal__nav {
+  flex-shrink: 0;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border: none;
+  border-radius: 11px;
+  background: #fff;
+  color: #15803d;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+.ud-monthcal__nav:hover:not(:disabled) {
+  background: rgba(22, 163, 74, 0.12);
+  box-shadow: 0 2px 6px rgba(22, 163, 74, 0.15);
+}
+
+.ud-monthcal__nav:disabled {
+  opacity: 0.35;
+  cursor: default;
+  box-shadow: none;
+}
+
+.ud-monthcal__panes {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+}
+
+.ud-monthcal__pane {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.ud-monthcal__year-title {
+  text-align: center;
+  font-weight: 800;
+  font-size: 1.12rem;
+  color: var(--color-primary-dark);
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+
+.ud-monthcal__divider {
+  width: 1px;
+  margin: 0 0.25rem;
+  background: linear-gradient(180deg, transparent, rgba(23, 111, 90, 0.2), transparent);
+  align-self: stretch;
+  min-height: 9.25rem;
+}
+
+.ud-monthcal__grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.ud-monthcal__cell {
+  border: 1px solid rgba(23, 111, 90, 0.14);
+  border-radius: 11px;
+  padding: 0.5rem 0.28rem;
+  min-height: 2.45rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  background: #fff;
+  color: #334155;
+  cursor: pointer;
+  font-family: inherit;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.8) inset;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease,
+    color 0.12s ease,
+    box-shadow 0.12s ease;
+}
+
+.ud-monthcal__cell:hover:not(:disabled) {
+  background: rgba(22, 163, 74, 0.08);
+  border-color: rgba(22, 163, 74, 0.35);
+  color: #0f5a45;
+}
+
+.ud-monthcal__cell.is-in-range {
+  background: linear-gradient(165deg, #22c55e 0%, #15803d 100%);
+  border-color: #166534;
+  color: #fff;
+  box-shadow: 0 2px 6px rgba(22, 163, 74, 0.35);
+}
+
+.ud-monthcal__cell:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ud-monthcal__summary {
+  margin: 0 0.75rem 0.6rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 11px;
+  background: rgba(22, 163, 74, 0.1);
+  border: 1px solid rgba(22, 163, 74, 0.22);
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.ud-monthcal__summary-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: rgba(15, 23, 42, 0.55);
+}
+
+.ud-monthcal__summary-value {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #14532d;
+}
+
+.ud-monthcal__footer {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.75rem 0.75rem;
+  border-top: 1px solid rgba(23, 111, 90, 0.1);
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.ud-monthcal__footer-apply {
+  padding: 0.42rem 1rem !important;
+  font-size: 0.85rem !important;
+}
+
+.ud-monthcal__footer-cancel {
+  padding: 0.42rem 0.75rem !important;
+  font-size: 0.85rem !important;
 }
 
 .ud-cases__field {
@@ -5533,6 +5820,29 @@ select.auth-field__input {
   border-radius: 6px;
   padding: 0.35rem 0.5rem;
   white-space: pre-wrap;
+}
+
+.ud-cases__followup-edit {
+  margin: 0;
+}
+
+.ud-cases__followup-edit-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.ud-cases__followup-date-input {
+  flex: 1 1 10rem;
+  min-width: 0;
+  max-width: 14rem;
+}
+
+.ud-cases__followup-save {
+  flex-shrink: 0;
+  padding: 0.32rem 0.7rem !important;
+  font-size: 0.78rem !important;
 }
 
 .ud-cases__add-status {

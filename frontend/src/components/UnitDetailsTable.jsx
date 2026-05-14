@@ -7,6 +7,8 @@ import {
   normalizeUnitDetailColumnPrefs,
   UNIT_DETAIL_COLUMN_LABELS
 } from "../constants/unitDetailColumns";
+import LegalStatusCell from "./LegalStatusCell";
+import { formatPhoneDisplay, formatProperName } from "../lib/tenantDisplayFormat";
 
 function formatMoney(n) {
   const v = Number(n);
@@ -71,7 +73,7 @@ function getSortValue(u, key) {
       return Number.isNaN(n) ? String(raw) : n;
     }
     case "legalStatus":
-      return u.legalStatus ?? "";
+      return `${u.legalStatus ?? ""}\t${Number(u.openLegalCaseCount) || 0}`;
     case "note":
       return u.note ?? "";
     case "nextFollowUp":
@@ -161,7 +163,7 @@ function renderBodyCells(u, visibleOrder, baseLink, openPaymentReminder, reminde
         parts.push(<td key="u">{u.unit ?? "—"}</td>);
         break;
       case "name":
-        parts.push(<td key="n">{u.name ?? "—"}</td>);
+        parts.push(<td key="n">{formatProperName(u.name ?? "") || "—"}</td>);
         break;
       case "tenantCode":
         parts.push(
@@ -188,7 +190,11 @@ function renderBodyCells(u, visibleOrder, baseLink, openPaymentReminder, reminde
         parts.push(<td key="md">{u.monthsDelinquent ?? "—"}</td>);
         break;
       case "legalStatus":
-        parts.push(<td key="ls">{u.legalStatus ?? "—"}</td>);
+        parts.push(
+          <td key="ls" className="unit-detail-legal-status">
+            <LegalStatusCell status={u.legalStatus} openCount={u.openLegalCaseCount} />
+          </td>
+        );
         break;
       case "note": {
         const noteText = String(u.note ?? "").trim();
@@ -210,9 +216,11 @@ function renderBodyCells(u, visibleOrder, baseLink, openPaymentReminder, reminde
           </td>
         );
         break;
-      case "phone":
-        parts.push(<td key="ph">{phoneValue(u) || "—"}</td>);
+      case "phone": {
+        const ph = phoneValue(u);
+        parts.push(<td key="ph">{formatPhoneDisplay(ph) || ph || "—"}</td>);
         break;
+      }
       case "email":
         parts.push(
           <td key="em">

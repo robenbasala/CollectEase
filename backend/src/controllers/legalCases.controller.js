@@ -1,6 +1,6 @@
 /**
  * Legal case workflow per tenant unit:
- *   - One tenant unit may have many cases (each opened with year/month + note + follow-up).
+ *   - One tenant unit may have many cases (each opened with a from/to month range + note + follow-up).
  *   - Each case has many status entries (court history), with the most recent one driving the
  *     "latest legal status" badge shown on the main detail report.
  *   - Cases can be closed (sets ClosedAt) and reopened.
@@ -20,6 +20,43 @@ function toIsoOrNull(v) {
   const d = new Date(v);
   if (Number.isNaN(d.getTime())) return null;
   return d.toISOString();
+}
+
+function monthOrd(y, m) {
+  return y * 12 + (m - 1);
+}
+
+/** FROM = openYear/openMonth; TO = openEnd* (null when same month as FROM or legacy). */
+function resolveOpenMonthRange(openYear, openMonth, endYearRaw, endMonthRaw) {
+  if (!Number.isInteger(openYear) || openYear < 1900 || openYear > 9999) {
+    return { ok: false, error: "openYear must be a valid year" };
+  }
+  if (!Number.isInteger(openMonth) || openMonth < 1 || openMonth > 12) {
+    return { ok: false, error: "openMonth must be 1..12" };
+  }
+  const hasEndY = endYearRaw !== undefined && endYearRaw !== null && String(endYearRaw).trim() !== "";
+  const hasEndM = endMonthRaw !== undefined && endMonthRaw !== null && String(endMonthRaw).trim() !== "";
+  if (hasEndY !== hasEndM) {
+    return { ok: false, error: "openEndYear and openEndMonth must both be set or both omitted" };
+  }
+  if (!hasEndY) {
+    return { ok: true, openYear, openMonth, openEndYear: null, openEndMonth: null };
+  }
+  const openEndYear = Number(endYearRaw);
+  const openEndMonth = Number(endMonthRaw);
+  if (!Number.isInteger(openEndYear) || openEndYear < 1900 || openEndYear > 9999) {
+    return { ok: false, error: "openEndYear must be a valid year" };
+  }
+  if (!Number.isInteger(openEndMonth) || openEndMonth < 1 || openEndMonth > 12) {
+    return { ok: false, error: "openEndMonth must be 1..12" };
+  }
+  if (monthOrd(openEndYear, openEndMonth) < monthOrd(openYear, openMonth)) {
+    return { ok: false, error: "To month/year must be on or after From month/year" };
+  }
+  if (monthOrd(openEndYear, openEndMonth) === monthOrd(openYear, openMonth)) {
+    return { ok: true, openYear, openMonth, openEndYear: null, openEndMonth: null };
+  }
+  return { ok: true, openYear, openMonth, openEndYear, openEndMonth };
 }
 
 /** Resolve the preset list chosen on a property. Falls back to company default, then List1. */
@@ -54,6 +91,8 @@ function rowCase(r) {
     tenantCode: r.TenantCode ?? r.tenantCode ?? "",
     openYear: r.OpenYear != null ? Number(r.OpenYear) : null,
     openMonth: r.OpenMonth != null ? Number(r.OpenMonth) : null,
+    openEndYear: r.OpenEndYear != null ? Number(r.OpenEndYear) : null,
+    openEndMonth: r.OpenEndMonth != null ? Number(r.OpenEndMonth) : null,
     initialNote: r.InitialNote ?? r.initialNote ?? "",
     followUpAt:
       r.FollowUpAt instanceof Date
@@ -120,7 +159,7 @@ async function listCases(req, res) {
   try {
     const result = await query(
       `SELECT c.Id, c.PropertyName, c.Unit, c.TenantName, c.TenantCode,
-              c.OpenYear, c.OpenMonth, c.InitialNote, c.FollowUpAt,
+              c.OpenYear, c.OpenMonth, c.OpenEndYear, c.OpenEndMonth, c.InitialNote, c.FollowUpAt,
               c.IsClosed, c.ClosedAt, c.CreatedAt, c.CreatedByName,
               s.Status AS LatestStatus, s.ChangedAt AS LatestStatusAt,
               (SELECT COUNT(*) FROM dbo.UnitLegalCaseStatus WHERE CaseId = c.Id) AS StatusCount
@@ -167,23 +206,20 @@ async function createCase(req, res) {
     return res.status(403).json({ error: "No access to this property." });
   }
 
-  const openYear = Number(b.openYear);
-  const openMonth = Number(b.openMonth);
-  if (!Number.isInteger(openYear) || openYear < 1900 || openYear > 9999) {
-    return res.status(400).json({ error: "openYear must be a valid year" });
+  const range = resolveOpenMonthRange(Number(b.openYear), Number(b.openMonth), b.openEndYear, b.openEndMonth);
+  if (!range.ok) {
+    return res.status(400).json({ error: range.error });
   }
-  if (!Number.isInteger(openMonth) || openMonth < 1 || openMonth > 12) {
-    return res.status(400).json({ error: "openMonth must be 1..12" });
-  }
+  const { openYear, openMonth, openEndYear, openEndMonth } = range;
   const initialNote = b.initialNote != null ? String(b.initialNote).slice(0, 4000) : null;
   const followUpAt = toIsoOrNull(b.followUpAt);
   const createdByName = b.createdByName != null ? String(b.createdByName).trim().slice(0, 256) : null;
 
   const result = await query(
     `INSERT INTO dbo.UnitLegalCase
-       (CompanyId, PropertyName, Unit, TenantName, TenantCode, OpenYear, OpenMonth, InitialNote, FollowUpAt, CreatedByName)
+       (CompanyId, PropertyName, Unit, TenantName, TenantCode, OpenYear, OpenMonth, OpenEndYear, OpenEndMonth, InitialNote, FollowUpAt, CreatedByName)
      OUTPUT INSERTED.Id
-     VALUES (@companyId, @property, @unit, @name, @tenantCode, @openYear, @openMonth, @initialNote, @followUpAt, @createdByName)`,
+     VALUES (@companyId, @property, @unit, @name, @tenantCode, @openYear, @openMonth, @openEndYear, @openEndMonth, @initialNote, @followUpAt, @createdByName)`,
     {
       companyId: { type: sql.Int, value: ctx.companyId },
       property: { type: sql.NVarChar(400), value: identity.property },
@@ -192,6 +228,8 @@ async function createCase(req, res) {
       tenantCode: { type: sql.NVarChar(200), value: identity.tenantCode },
       openYear: { type: sql.SmallInt, value: openYear },
       openMonth: { type: sql.TinyInt, value: openMonth },
+      openEndYear: { type: sql.SmallInt, value: openEndYear },
+      openEndMonth: { type: sql.TinyInt, value: openEndMonth },
       initialNote: { type: sql.NVarChar(sql.MAX), value: initialNote },
       followUpAt: { type: sql.DateTime2, value: followUpAt ? new Date(followUpAt) : null },
       createdByName: { type: sql.NVarChar(256), value: createdByName }
@@ -210,7 +248,7 @@ async function getCase(req, res) {
   }
   const result = await query(
     `SELECT c.Id, c.PropertyName, c.Unit, c.TenantName, c.TenantCode,
-            c.OpenYear, c.OpenMonth, c.InitialNote, c.FollowUpAt,
+            c.OpenYear, c.OpenMonth, c.OpenEndYear, c.OpenEndMonth, c.InitialNote, c.FollowUpAt,
             c.IsClosed, c.ClosedAt, c.CreatedAt, c.CreatedByName,
             s.Status AS LatestStatus, s.ChangedAt AS LatestStatusAt,
             (SELECT COUNT(*) FROM dbo.UnitLegalCaseStatus WHERE CaseId = c.Id) AS StatusCount
@@ -273,21 +311,44 @@ async function patchCase(req, res) {
       value: b.initialNote == null ? null : String(b.initialNote).slice(0, 4000)
     };
   }
-  if (b.openYear !== undefined) {
-    const y = Number(b.openYear);
-    if (!Number.isInteger(y) || y < 1900 || y > 9999) {
-      return res.status(400).json({ error: "openYear invalid" });
+  const touchesOpenRange =
+    b.openYear !== undefined ||
+    b.openMonth !== undefined ||
+    b.openEndYear !== undefined ||
+    b.openEndMonth !== undefined;
+  if (touchesOpenRange) {
+    const cur = await query(
+      `SELECT OpenYear, OpenMonth, OpenEndYear, OpenEndMonth FROM dbo.UnitLegalCase WHERE Id = @id AND CompanyId = @companyId`,
+      {
+        id: { type: sql.Int, value: id },
+        companyId: { type: sql.Int, value: ctx.companyId }
+      }
+    );
+    const crow = cur.recordset?.[0];
+    if (!crow) return res.status(404).json({ error: "not found" });
+    const sy = b.openYear !== undefined ? Number(b.openYear) : Number(crow.OpenYear);
+    const sm = b.openMonth !== undefined ? Number(b.openMonth) : Number(crow.OpenMonth);
+    let endYRaw;
+    let endMRaw;
+    if (b.openEndYear !== undefined || b.openEndMonth !== undefined) {
+      endYRaw = b.openEndYear;
+      endMRaw = b.openEndMonth;
+    } else {
+      endYRaw = crow.OpenEndYear;
+      endMRaw = crow.OpenEndMonth;
+    }
+    const range = resolveOpenMonthRange(sy, sm, endYRaw, endMRaw);
+    if (!range.ok) {
+      return res.status(400).json({ error: range.error });
     }
     fields.push("OpenYear = @openYear");
-    inputs.openYear = { type: sql.SmallInt, value: y };
-  }
-  if (b.openMonth !== undefined) {
-    const m = Number(b.openMonth);
-    if (!Number.isInteger(m) || m < 1 || m > 12) {
-      return res.status(400).json({ error: "openMonth invalid" });
-    }
     fields.push("OpenMonth = @openMonth");
-    inputs.openMonth = { type: sql.TinyInt, value: m };
+    fields.push("OpenEndYear = @openEndYear");
+    fields.push("OpenEndMonth = @openEndMonth");
+    inputs.openYear = { type: sql.SmallInt, value: range.openYear };
+    inputs.openMonth = { type: sql.TinyInt, value: range.openMonth };
+    inputs.openEndYear = { type: sql.SmallInt, value: range.openEndYear };
+    inputs.openEndMonth = { type: sql.TinyInt, value: range.openEndMonth };
   }
   if (b.isClosed !== undefined) {
     const closed = Boolean(b.isClosed);

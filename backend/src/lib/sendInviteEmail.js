@@ -1,8 +1,27 @@
 const nodemailer = require("nodemailer");
 
+/** Encode for HTML attribute values (href). Raw `&` breaks many mail clients' parsers. */
+function escapeHtmlAttr(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+    .replace(/</g, "&lt;");
+}
+
+/** Encode visible URL / text in body. */
+function escapeHtmlText(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
 function buildInviteHtml({ appName, passwordResetLink, invitedEmail }) {
   const safeEmail = String(invitedEmail || "").replace(/</g, "");
   const safeApp = String(appName || "CollectEase").replace(/</g, "");
+  const hrefReset = escapeHtmlAttr(passwordResetLink);
+  const visibleResetUrl = escapeHtmlText(passwordResetLink);
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -28,14 +47,23 @@ function buildInviteHtml({ appName, passwordResetLink, invitedEmail }) {
             <td style="padding:26px 32px 8px;">
               <p style="margin:0 0 10px;font-size:15px;font-weight:600;color:#0f2744;">Set your password for the first time</p>
               <p style="margin:0;color:rgba(15,39,68,0.7);font-size:14px;line-height:1.6;">
-                Click the button below to choose the password you'll use to sign in. After that, return to the app and sign in with
+                Use the button or the underlined link below to choose the password you'll use to sign in. After that, return to the app and sign in with
                 <strong style="color:#125546;">${safeEmail}</strong> and your new password.
               </p>
             </td>
           </tr>
           <tr>
             <td style="padding:18px 32px 26px;text-align:center;">
-              <a href="${passwordResetLink}" style="display:inline-block;padding:13px 30px;border-radius:12px;background:linear-gradient(180deg,#1f8a6f 0%,#176f5a 60%,#125546 100%);color:#ffffff;font-weight:700;font-size:15px;letter-spacing:0.01em;text-decoration:none;box-shadow:0 10px 24px rgba(23,111,90,0.28);">Set my password</a>
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" align="center" style="margin:0 auto;">
+                <tr>
+                  <td align="center" bgcolor="#176f5a" style="border-radius:12px;background-color:#176f5a;">
+                    <a href="${hrefReset}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:13px 30px;color:#ffffff;font-weight:700;font-size:15px;text-decoration:none;font-family:Arial,Helvetica,sans-serif;line-height:1.25;">Set my password</a>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin:14px 0 0;font-size:15px;line-height:1.5;">
+                <a href="${hrefReset}" target="_blank" rel="noopener noreferrer" style="color:#125546;font-weight:700;text-decoration:underline;">Set my password</a>
+              </p>
               <p style="margin:18px 0 0;font-size:12px;color:rgba(15,39,68,0.5);line-height:1.5;">This link can be used only once and expires after a short time.</p>
             </td>
           </tr>
@@ -44,8 +72,8 @@ function buildInviteHtml({ appName, passwordResetLink, invitedEmail }) {
               <div style="padding:14px 16px;border-radius:12px;background:#f8fafc;border:1px solid rgba(15,23,42,0.06);">
                 <p style="margin:0 0 6px;font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:rgba(15,39,68,0.55);">Button not working?</p>
                 <p style="margin:0;font-size:12px;color:rgba(15,39,68,0.7);line-height:1.55;word-break:break-all;">
-                  Copy this URL into your browser:<br/>
-                  <span style="color:#125546;">${passwordResetLink}</span>
+                  Copy this URL into your browser, or tap the link:<br/>
+                  <a href="${hrefReset}" target="_blank" rel="noopener noreferrer" style="color:#125546;font-weight:600;text-decoration:underline;">${visibleResetUrl}</a>
                 </p>
               </div>
             </td>

@@ -29,6 +29,17 @@ const TC = q("tenantCode");
 const DT_BAL = `ISNULL(TRY_CAST(dt.${B} AS DECIMAL(18,4)), 0)`;
 const DT_RENT = `ISNULL(TRY_CAST(dt.${RT} AS DECIMAL(18,4)), 0)`;
 
+function nextFollowUpToMillis(v) {
+  if (v == null || v === "") return null;
+  if (v instanceof Date) {
+    const t = v.getTime();
+    return Number.isNaN(t) ? null : t;
+  }
+  const d = new Date(v);
+  const t = d.getTime();
+  return Number.isNaN(t) ? null : t;
+}
+
 function pickNum(row, ...names) {
   if (!row || typeof row !== "object") return 0;
   for (const name of names) {
@@ -698,9 +709,53 @@ async function getUnits(req, res) {
     }
   }
 
-  /** Overlay: each row's `nextFollowUp` is the soonest (MIN) FollowUpAt across the tenant's OPEN
-   *  legal cases. Rows with no open case (or with cases that have no follow-up date) fall back to
-   *  the legacy DataTbl nextFollowUp value so existing reminders don't disappear after migration. */
+  /** Open legal case count per tenant (for Legal Status column). Silently skipped if table missing. */
+  for (const u of units) {
+    u.openLegalCaseCount = 0;
+  }
+  if (units.length > 0) {
+    try {
+      const cntInputs = { companyId: { type: sql.Int, value: companyId } };
+      allowed.forEach((name, i) => {
+        cntInputs[`cntProp${i}`] = { type: sql.NVarChar(400), value: name };
+      });
+      const cntPlaceholders = allowed.map((_, i) => `@cntProp${i}`).join(", ");
+      const cntRes = await query(
+        `SELECT PropertyName, Unit, TenantName, TenantCode, COUNT(*) AS OpenCaseCount
+         FROM dbo.UnitLegalCase
+         WHERE CompanyId = @companyId
+           AND IsClosed = 0
+           AND PropertyName IN (${cntPlaceholders})
+         GROUP BY PropertyName, Unit, TenantName, TenantCode`,
+        cntInputs
+      );
+      const idKey = (p, u, n) =>
+        `${String(p ?? "").trim().toLowerCase()}|${String(u ?? "").trim().toLowerCase()}|${String(n ?? "").trim().toLowerCase()}`;
+      function idKeyTenant(p, u, n, tc) {
+        const base = idKey(p, u, n);
+        const t =
+          tc == null || String(tc).trim() === ""
+            ? "__NULL__"
+            : String(tc).trim().toLowerCase();
+        return `${base}|${t}`;
+      }
+      const countMap = new Map();
+      for (const r of cntRes.recordset || []) {
+        const k = idKeyTenant(r.PropertyName, r.Unit, r.TenantName, r.TenantCode);
+        countMap.set(k, Number(r.OpenCaseCount ?? r.opencasecount ?? 0) || 0);
+      }
+      for (const u of units) {
+        const k = idKeyTenant(u.property, u.unit, u.name, u.tenantCode);
+        u.openLegalCaseCount = countMap.get(k) ?? 0;
+      }
+    } catch (e) {
+      if (!/Invalid object name/i.test(String(e?.message || ""))) throw e;
+    }
+  }
+
+  /** Overlay: `nextFollowUp` shown is the earliest of (a) DataTbl NextFollowUp (unit workspace /
+   *  schedule) and (b) MIN(FollowUpAt) on open legal cases for that tenant, so dashboard dates
+   *  and legal-case dates both surface. */
   if (units.length > 0) {
     try {
       const fuInputs = { companyId: { type: sql.Int, value: companyId } };
@@ -728,11 +783,18 @@ async function getUnits(req, res) {
           : (r.NextFollowUp ?? null);
         if (iso) fuMap.set(k, iso);
       }
-      if (fuMap.size > 0) {
-        for (const u of units) {
-          const k = key(u.property, u.unit, u.name);
-          const iso = fuMap.get(k);
-          if (iso) u.nextFollowUp = iso;
+      for (const u of units) {
+        const k = key(u.property, u.unit, u.name);
+        const legalIso = fuMap.get(k);
+        const dtMs = nextFollowUpToMillis(u.nextFollowUp);
+        const legalMs = legalIso ? nextFollowUpToMillis(legalIso) : null;
+        const candidates = [];
+        if (dtMs != null) candidates.push(dtMs);
+        if (legalMs != null) candidates.push(legalMs);
+        if (candidates.length === 0) {
+          u.nextFollowUp = null;
+        } else {
+          u.nextFollowUp = new Date(Math.min(...candidates)).toISOString();
         }
       }
     } catch (e) {

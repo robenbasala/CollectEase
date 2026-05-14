@@ -20,6 +20,8 @@ BEGIN
     TenantCode NVARCHAR(200) NULL,
     OpenYear SMALLINT NOT NULL,
     OpenMonth TINYINT NOT NULL,
+    OpenEndYear SMALLINT NULL,
+    OpenEndMonth TINYINT NULL,
     InitialNote NVARCHAR(MAX) NULL,
     FollowUpAt DATETIME2 NULL,
     IsClosed BIT NOT NULL CONSTRAINT DF_UnitLegalCase_IsClosed DEFAULT 0,
@@ -28,7 +30,13 @@ BEGIN
     CreatedByName NVARCHAR(256) NULL,
     CONSTRAINT FK_UnitLegalCase_Companies FOREIGN KEY (CompanyId) REFERENCES dbo.Companies (Id),
     CONSTRAINT CK_UnitLegalCase_OpenMonth CHECK (OpenMonth BETWEEN 1 AND 12),
-    CONSTRAINT CK_UnitLegalCase_OpenYear CHECK (OpenYear BETWEEN 1900 AND 9999)
+    CONSTRAINT CK_UnitLegalCase_OpenYear CHECK (OpenYear BETWEEN 1900 AND 9999),
+    CONSTRAINT CK_UnitLegalCase_OpenEndYear CHECK (OpenEndYear IS NULL OR (OpenEndYear BETWEEN 1900 AND 9999)),
+    CONSTRAINT CK_UnitLegalCase_OpenEndMonth CHECK (OpenEndMonth IS NULL OR (OpenEndMonth BETWEEN 1 AND 12)),
+    CONSTRAINT CK_UnitLegalCase_OpenEndPair CHECK (
+      (OpenEndYear IS NULL AND OpenEndMonth IS NULL)
+      OR (OpenEndYear IS NOT NULL AND OpenEndMonth IS NOT NULL)
+    )
   );
   CREATE INDEX IX_UnitLegalCase_Lookup ON dbo.UnitLegalCase (CompanyId, PropertyName, Unit, TenantName, IsClosed, CreatedAt DESC);
 END

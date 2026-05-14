@@ -14,6 +14,8 @@ import {
 } from "lucide-react";
 import { api } from "../api/apiClient";
 import { getActiveMsAccount } from "../microsoft/msGraphMail";
+import LegalStatusCell from "./LegalStatusCell";
+import { formatPhoneDisplay, formatProperName } from "../lib/tenantDisplayFormat";
 import UnitLegalCasesPanel from "./UnitLegalCasesPanel";
 
 function tenantCodeFromUnit(u) {
@@ -306,7 +308,7 @@ export default function UnitDetailRowModal({
               </div>
               <div className="ud-row-modal__field">
                 <label>Name</label>
-                <input readOnly value={unit.name ?? ""} />
+                <input readOnly value={formatProperName(unit.name ?? "")} />
               </div>
               <div className="ud-row-modal__field">
                 <label>Balance</label>
@@ -330,7 +332,7 @@ export default function UnitDetailRowModal({
               </div>
               <div className="ud-row-modal__field ud-row-modal__field--wide">
                 <label>Phone</label>
-                <input readOnly value={phone || "—"} />
+                <input readOnly value={formatPhoneDisplay(phone) || phone || "—"} />
               </div>
             </div>
 
@@ -369,7 +371,9 @@ export default function UnitDetailRowModal({
 
               <div className="ud-row-modal__current-legal">
                 <span className="text-muted">Current legal status</span>
-                <strong>{unit.legalStatus || "—"}</strong>
+                <div className="ud-row-modal__current-legal-value">
+                  <LegalStatusCell status={unit.legalStatus} openCount={unit.openLegalCaseCount} compact />
+                </div>
               </div>
 
               <div className="ud-row-modal__quick-btns">
