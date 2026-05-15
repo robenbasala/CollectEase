@@ -6,6 +6,9 @@ const adminRoutes = require("./routes/admin.routes");
 const companiesRoutes = require("./routes/companies.routes");
 const authRoutes = require("./routes/auth.routes");
 const { verifyFirebaseIdToken, attachRegisteredUser } = require("./middleware/firebaseAuth");
+const { startDataflowScheduler } = require("./services/dataflowScheduler");
+
+const dataflowsRoutes = require("./routes/dataflows.routes");
 
 const app = express();
 const PORT = Number(process.env.PORT) || 5000;
@@ -20,13 +23,16 @@ app.get("/api/health", (_req, res) => {
 
 app.use("/api/auth", authRoutes);
 
+/** Register before the broad `/api` dataflows mount so `/api/companies/.../dataflows` is not swallowed incorrectly. */
 app.use("/api/companies", verifyFirebaseIdToken, attachRegisteredUser, companiesRoutes);
 app.use("/api/dashboard", verifyFirebaseIdToken, attachRegisteredUser, dashboardRoutes);
 app.use("/api/admin", verifyFirebaseIdToken, attachRegisteredUser, adminRoutes);
 
+app.use("/api", verifyFirebaseIdToken, attachRegisteredUser, dataflowsRoutes);
+
 app.use("/api", (req, res) => {
   res.status(404).json({
-    error: `No API route for ${req.method} ${req.originalUrl}. If you just pulled new code, restart the backend (npm run dev in backend).`
+    error: `No API route for ${req.method} ${req.originalUrl}. If you just pulled new code, restart the backend (from the backend folder: npm run dev). Expected dataflow paths include GET /api/companies/:id/dataflows and POST /api/dataflows/read-source.`
   });
 });
 
@@ -40,4 +46,9 @@ app.use((err, _req, res, _next) => {
 
 app.listen(PORT, () => {
   console.log(`API listening on http://localhost:${PORT}/api`);
+  try {
+    startDataflowScheduler();
+  } catch (e) {
+    console.error("[dataflow-scheduler] failed to start", e?.message || e);
+  }
 });

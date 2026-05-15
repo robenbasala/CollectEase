@@ -111,6 +111,8 @@ async function request(method, path, { query, body, omitCompanyId } = {}) {
     err.status = res.status;
     if (data?.code) err.code = data.code;
     if (data?.details != null) err.details = data.details;
+    if (Array.isArray(data?.validationErrors)) err.validationErrors = data.validationErrors;
+    if (Array.isArray(data?.warnings)) err.warnings = data.warnings;
     throw err;
   }
   return data;
@@ -223,5 +225,26 @@ export const api = {
   putAdminLegalStatusPresetOption: (listId, id, body) =>
     request("PUT", `/admin/legal-status-preset-lists/${listId}/options/${id}`, { body }),
   deleteAdminLegalStatusPresetOption: (listId, id) =>
-    request("DELETE", `/admin/legal-status-preset-lists/${listId}/options/${id}`)
+    request("DELETE", `/admin/legal-status-preset-lists/${listId}/options/${id}`),
+
+  /* Company dataflows (admin): Excel → transform → SQL upsert */
+  listCompanyDataflows: (companyId) =>
+    request("GET", `/companies/${encodeURIComponent(companyId)}/dataflows`),
+  getDataflow: (id) => request("GET", `/dataflows/${encodeURIComponent(id)}`),
+  postCompanyDataflow: (companyId, body) =>
+    request("POST", `/companies/${encodeURIComponent(companyId)}/dataflows`, { body }),
+  putDataflow: (id, body) => request("PUT", `/dataflows/${encodeURIComponent(id)}`, { body }),
+  deleteDataflow: (id) => request("DELETE", `/dataflows/${encodeURIComponent(id)}`),
+  postDataflowReadSource: (body) => request("POST", "/dataflows/read-source", { body }),
+  postDataflowPreview: (body) => request("POST", "/dataflows/preview", { body }),
+  postDataflowAutoMap: (body) => request("POST", "/dataflows/auto-map", { body }),
+  postDataflowRun: (id) => request("POST", `/dataflows/${encodeURIComponent(id)}/run`),
+  getDataflowRuns: (id, query) =>
+    request("GET", `/dataflows/${encodeURIComponent(id)}/runs`, { query }),
+  getDataflowRun: (runId) => request("GET", `/dataflow-runs/${encodeURIComponent(runId)}`),
+  getDataflowRunErrors: (runId, query) =>
+    request("GET", `/dataflow-runs/${encodeURIComponent(runId)}/errors`, { query }),
+  getSqlTables: () => request("GET", "/sql/tables"),
+  getSqlTableSchema: (tableName) =>
+    request("GET", `/sql/tables/${encodeURIComponent(tableName)}/schema`)
 };

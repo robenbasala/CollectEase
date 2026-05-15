@@ -218,7 +218,7 @@ function LegalCaseMonthRangeCalendar({
             disabled={disabled || leftYear <= 1900}
             onClick={() => setLeftYear((y) => Math.max(1900, y - 1))}
           >
-            <ChevronLeft size={22} strokeWidth={2.25} />
+            <ChevronLeft size={17} strokeWidth={2.1} />
           </button>
           <div className="ud-monthcal__panes">
             <div className="ud-monthcal__pane">
@@ -270,7 +270,7 @@ function LegalCaseMonthRangeCalendar({
             disabled={disabled || leftYear >= 9998}
             onClick={() => setLeftYear((y) => Math.min(9998, y + 1))}
           >
-            <ChevronRight size={22} strokeWidth={2.25} />
+            <ChevronRight size={17} strokeWidth={2.1} />
           </button>
         </div>
         <div className="ud-monthcal__summary">

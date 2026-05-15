@@ -5394,15 +5394,15 @@ select.auth-field__input {
 .ud-monthcal {
   background: #fff;
   border: 1px solid rgba(23, 111, 90, 0.2);
-  border-radius: 14px;
+  border-radius: 10px;
   overflow: hidden;
 }
 
 .ud-monthcal__chrome {
   display: flex;
   align-items: stretch;
-  gap: 0.45rem;
-  padding: 0.65rem 0.5rem 0.7rem;
+  gap: 0.35rem;
+  padding: 0.5rem 0.4rem 0.55rem;
   background: linear-gradient(180deg, #f8faf9 0%, #f1f5f4 100%);
 }
 
@@ -5412,10 +5412,11 @@ select.auth-field__input {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 2.5rem;
-  height: 2.5rem;
-  border: none;
-  border-radius: 11px;
+  width: 1.875rem;
+  height: 1.875rem;
+  padding: 0;
+  border: 1px solid rgba(23, 111, 90, 0.18);
+  border-radius: 5px;
   background: #fff;
   color: #15803d;
   cursor: pointer;
@@ -5444,40 +5445,57 @@ select.auth-field__input {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.35rem;
 }
 
 .ud-monthcal__year-title {
   text-align: center;
   font-weight: 800;
-  font-size: 1.12rem;
+  font-size: 0.9rem;
   color: var(--color-primary-dark);
-  letter-spacing: 0.04em;
+  letter-spacing: 0.03em;
   font-variant-numeric: tabular-nums;
+  line-height: 1.2;
 }
 
 .ud-monthcal__divider {
-  width: 1px;
-  margin: 0 0.25rem;
-  background: linear-gradient(180deg, transparent, rgba(23, 111, 90, 0.2), transparent);
+  flex-shrink: 0;
+  width: 2px;
+  margin: 0 0.22rem;
+  border-radius: 1px;
+  background: linear-gradient(
+    180deg,
+    rgba(20, 83, 45, 0.25) 0%,
+    #15803d 10%,
+    #14532d 50%,
+    #15803d 90%,
+    rgba(20, 83, 45, 0.25) 100%
+  );
   align-self: stretch;
-  min-height: 9.25rem;
 }
 
 .ud-monthcal__grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0.5rem;
+  gap: 0.28rem;
 }
 
 .ud-monthcal__cell {
+  box-sizing: border-box;
+  width: 100%;
+  aspect-ratio: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid rgba(23, 111, 90, 0.14);
-  border-radius: 11px;
-  padding: 0.5rem 0.28rem;
-  min-height: 2.45rem;
-  font-size: 0.82rem;
+  border-radius: 4px;
+  padding: 0.08rem 0.12rem;
+  font-size: 0.62rem;
   font-weight: 700;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.01em;
+  line-height: 1.1;
   background: #fff;
   color: #334155;
   cursor: pointer;
@@ -5500,7 +5518,7 @@ select.auth-field__input {
   background: linear-gradient(165deg, #22c55e 0%, #15803d 100%);
   border-color: #166534;
   color: #fff;
-  box-shadow: 0 2px 6px rgba(22, 163, 74, 0.35);
+  box-shadow: 0 1px 4px rgba(22, 163, 74, 0.3);
 }
 
 .ud-monthcal__cell:disabled {
@@ -5509,18 +5527,18 @@ select.auth-field__input {
 }
 
 .ud-monthcal__summary {
-  margin: 0 0.75rem 0.6rem;
-  padding: 0.6rem 0.75rem;
-  border-radius: 11px;
+  margin: 0 0.55rem 0.45rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: 6px;
   background: rgba(22, 163, 74, 0.1);
   border: 1px solid rgba(22, 163, 74, 0.22);
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
+  gap: 0.12rem;
 }
 
 .ud-monthcal__summary-label {
-  font-size: 0.68rem;
+  font-size: 0.62rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -5528,29 +5546,30 @@ select.auth-field__input {
 }
 
 .ud-monthcal__summary-value {
-  font-size: 1rem;
+  font-size: 0.84rem;
   font-weight: 700;
   color: #14532d;
+  line-height: 1.25;
 }
 
 .ud-monthcal__footer {
   display: flex;
   justify-content: flex-end;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.55rem 0.75rem 0.75rem;
+  gap: 0.4rem;
+  padding: 0.45rem 0.55rem 0.55rem;
   border-top: 1px solid rgba(23, 111, 90, 0.1);
   background: rgba(255, 255, 255, 0.6);
 }
 
 .ud-monthcal__footer-apply {
-  padding: 0.42rem 1rem !important;
-  font-size: 0.85rem !important;
+  padding: 0.34rem 0.75rem !important;
+  font-size: 0.78rem !important;
 }
 
 .ud-monthcal__footer-cancel {
-  padding: 0.42rem 0.75rem !important;
-  font-size: 0.85rem !important;
+  padding: 0.34rem 0.6rem !important;
+  font-size: 0.78rem !important;
 }
 
 .ud-cases__field {
@@ -6118,4 +6137,961 @@ select.auth-field__input {
 
 .prop-legal-options__dlg-text:last-child {
   margin-bottom: 0;
+}
+
+/* —— Company dataflows (admin) —— */
+.dataflows-layout {
+  display: grid;
+  grid-template-columns: minmax(11rem, 16rem) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .dataflows-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.dataflows-list-page {
+  max-width: none;
+  width: 100%;
+}
+
+.dataflows-list-page__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.dataflows-list-page__title {
+  margin: 0;
+  font-size: 1.05rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 1 1 auto;
+  min-width: 12rem;
+}
+
+.dataflows-list-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.dataflows-list-table th,
+.dataflows-list-table td {
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  padding: 0.45rem 0.5rem;
+  text-align: left;
+}
+
+.dataflows-list-table th {
+  background: rgba(23, 111, 90, 0.08);
+  font-weight: 700;
+}
+
+.dataflows-link {
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/** Edge-to-edge within the admin page (cancels `.page` horizontal padding for this panel). */
+.dataflows-admin-fullwidth {
+  width: calc(100% + 2 * var(--page-gutter-x));
+  max-width: none;
+  margin-left: calc(-1 * var(--page-gutter-x));
+  margin-right: calc(-1 * var(--page-gutter-x));
+  box-sizing: border-box;
+}
+
+.dataflows-wizard-shell {
+  max-width: none;
+  width: 100%;
+  min-height: calc(100dvh - 10.5rem);
+  display: flex;
+  flex-direction: column;
+}
+
+.dataflows-wizard-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.65rem;
+  flex-shrink: 0;
+}
+
+.dataflows-wizard-banner {
+  font-size: 0.85rem;
+  color: rgba(15, 23, 42, 0.85);
+  flex: 1 1 12rem;
+}
+
+.dataflows-wizard {
+  display: grid;
+  grid-template-columns: minmax(9rem, 11rem) minmax(0, 1fr);
+  gap: 0.75rem 1rem;
+  align-items: start;
+  flex: 1;
+  min-height: 0;
+}
+
+@media (max-width: 720px) {
+  .dataflows-wizard {
+    grid-template-columns: 1fr;
+  }
+}
+
+.dataflows-wizard__steps {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  position: sticky;
+  top: 0.5rem;
+}
+
+.dataflows-wizard__step {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.45rem;
+  border-radius: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.65);
+  font-size: 0.78rem;
+  color: rgba(15, 23, 42, 0.65);
+}
+
+.dataflows-wizard__step.is-active {
+  border-color: rgba(22, 163, 74, 0.45);
+  background: rgba(22, 163, 74, 0.08);
+  color: var(--color-text);
+  font-weight: 700;
+}
+
+.dataflows-wizard__step.is-done {
+  border-color: rgba(23, 111, 90, 0.22);
+  color: rgba(15, 23, 42, 0.8);
+}
+
+.dataflows-wizard__step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.06);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.dataflows-wizard__step.is-active .dataflows-wizard__step-num {
+  background: rgba(22, 163, 74, 0.25);
+}
+
+.dataflows-wizard__step-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.dataflows-wizard__body {
+  padding: 1rem 1.1rem;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.dataflows-wizard__title {
+  margin: 0 0 0.5rem;
+  font-size: 1.05rem;
+}
+
+.dataflows-wizard-hint {
+  margin: 0 0 0.65rem;
+  font-size: 0.82rem;
+}
+
+.dataflows-wizard-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  flex: 1;
+  min-height: 0;
+}
+
+.dataflows-wizard-grid--transform {
+  flex: 1;
+  min-height: 0;
+}
+
+.dataflows-transform-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+  gap: 1rem;
+  align-items: stretch;
+  flex: 1;
+  min-height: 0;
+}
+
+@media (max-width: 960px) {
+  .dataflows-transform-split {
+    grid-template-columns: 1fr;
+  }
+}
+
+.dataflows-transform-split__editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  min-height: 0;
+}
+
+.dataflows-transform-split__editor .dataflows-code {
+  flex: 1;
+  min-height: 14rem;
+  resize: vertical;
+}
+
+.dataflows-transform-split__output {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 10px;
+  padding: 0.5rem 0.55rem 0.6rem;
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.dataflows-transform-split__out-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.dataflows-transform-split__out-title {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.dataflows-transform-placeholder {
+  margin: 0;
+  font-size: 0.82rem;
+  padding: 1rem 0.5rem;
+}
+
+.dataflows-transform-help {
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: 10px;
+  padding: 0.65rem 0.8rem;
+  background: rgba(248, 250, 252, 0.95);
+}
+
+.dataflows-transform-help__title {
+  margin: 0 0 0.4rem;
+  font-size: 0.95rem;
+}
+
+.dataflows-transform-help__text {
+  margin: 0 0 0.45rem;
+  font-size: 0.82rem;
+}
+
+.dataflows-alert--warn {
+  background: rgba(234, 179, 8, 0.12);
+  border: 1px solid rgba(217, 119, 6, 0.35);
+  color: #92400e;
+}
+
+.dataflows-transform-diag-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.dataflows-transform-diag {
+  font-size: 0.8rem;
+}
+
+.dataflows-transform-diag__head {
+  font-weight: 700;
+  margin-bottom: 0.2rem;
+}
+
+.dataflows-transform-diag__fix {
+  margin-top: 0.3rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.dataflows-transform-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: flex-end;
+}
+
+.dataflows-transform-toolbar__templates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: flex-end;
+}
+
+.dataflows-step-builder {
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: 10px;
+  padding: 0.55rem 0.65rem 0.65rem;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.dataflows-step-builder__head {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-weight: 700;
+  font-size: 0.85rem;
+  margin-bottom: 0.45rem;
+}
+
+.dataflows-step-builder__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: flex-end;
+  margin-bottom: 0.35rem;
+}
+
+.dataflows-step-builder__stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.dataflows-rename-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.dataflows-transform-details {
+  font-size: 0.84rem;
+}
+
+.dataflows-transform-details summary {
+  cursor: pointer;
+  font-weight: 600;
+  list-style: none;
+}
+
+.dataflows-transform-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.dataflows-transform-details__chev {
+  display: inline-block;
+  vertical-align: middle;
+  margin-left: 0.2rem;
+}
+
+.dataflows-colhint-table-wrap {
+  max-height: 14rem;
+  overflow: auto;
+  margin-top: 0.35rem;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 8px;
+}
+
+.dataflows-colhint-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.dataflows-colhint-table th,
+.dataflows-colhint-table td {
+  border-bottom: 1px solid rgba(15, 23, 42, 0.07);
+  padding: 0.3rem 0.4rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.dataflows-colhint-sample {
+  max-width: 11rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dataflows-expr-helpers {
+  font-size: 0.74rem;
+  margin: 0.5rem 0 0;
+  padding-left: 1.15rem;
+}
+
+.dataflows-expr-helpers code {
+  font-size: 0.72rem;
+}
+
+.dataflows-code--sm {
+  min-height: 4.5rem;
+  font-size: 0.78rem;
+}
+
+.dataflows-code--tall {
+  min-height: 20rem;
+  font-size: 0.8rem;
+}
+
+.dataflows-field--inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.dataflows-field--inline > span {
+  white-space: nowrap;
+}
+
+.dataflows-select,
+.dataflows-input {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.35rem 0.45rem;
+  border-radius: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.15);
+  background: #fff;
+  min-width: 0;
+}
+
+.dataflows-actions--wrap {
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.dataflows-transform-split__editor .dataflows-code--tall {
+  min-height: 18rem;
+}
+
+.btn-sm {
+  padding: 0.28rem 0.5rem;
+  font-size: 0.78rem;
+}
+
+.btn-xs {
+  padding: 0.18rem 0.38rem;
+  font-size: 0.72rem;
+}
+
+.dataflows-excel-preview--compact .dataflows-excel-meta {
+  font-size: 0.72rem;
+  margin-bottom: 0.25rem;
+}
+
+.dataflows-wizard-shell .dataflows-transform-split__output .dataflows-excel-scroll {
+  max-height: min(62vh, 44rem);
+}
+
+.dataflows-wizard__nav {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.dataflows-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: 8px;
+  font-size: 0.82rem;
+}
+
+.dataflows-alert--err {
+  background: rgba(220, 38, 38, 0.08);
+  border: 1px solid rgba(220, 38, 38, 0.25);
+  color: #991b1b;
+}
+
+.dataflows-coltype {
+  font-size: 0.68rem;
+  color: rgba(15, 23, 42, 0.55);
+  font-weight: 500;
+  margin-top: 0.1rem;
+}
+
+.dataflows-summary {
+  margin: 0;
+  display: grid;
+  grid-template-columns: minmax(8rem, 11rem) 1fr;
+  gap: 0.35rem 0.75rem;
+  font-size: 0.82rem;
+}
+
+.dataflows-summary dt {
+  margin: 0;
+  font-weight: 700;
+  color: rgba(15, 23, 42, 0.65);
+}
+
+.dataflows-summary dd {
+  margin: 0;
+}
+
+.dataflows-list.card-like,
+.dataflows-editor.card-like {
+  border: 1px solid rgba(23, 111, 90, 0.18);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.92);
+  padding: 0.85rem 1rem;
+}
+
+.dataflows-list__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.65rem;
+}
+
+.dataflows-list__title {
+  margin: 0;
+  font-size: 1rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.dataflows-list__ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  max-height: 70vh;
+  overflow: auto;
+}
+
+.dataflows-list__item {
+  width: 100%;
+  text-align: left;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 8px;
+  padding: 0.45rem 0.55rem;
+  background: #fff;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.dataflows-list__item--active {
+  border-color: rgba(22, 163, 74, 0.55);
+  box-shadow: 0 0 0 1px rgba(22, 163, 74, 0.2);
+}
+
+.dataflows-list__name {
+  font-weight: 700;
+  font-size: 0.88rem;
+  color: var(--color-text);
+}
+
+.dataflows-list__meta {
+  font-size: 0.72rem;
+}
+
+.dataflows-editor__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-bottom: 0.65rem;
+}
+
+.dataflows-msg {
+  margin: 0 0 0.65rem;
+  font-size: 0.88rem;
+  white-space: pre-wrap;
+}
+
+.dataflows-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem 0.75rem;
+}
+
+.dataflows-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.78rem;
+  color: rgba(15, 23, 42, 0.75);
+  font-weight: 600;
+}
+
+.dataflows-field--wide {
+  grid-column: 1 / -1;
+}
+
+.dataflows-field--check {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.dataflows-path-row {
+  display: flex;
+  gap: 0.35rem;
+  align-items: stretch;
+}
+
+.dataflows-path-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.dataflows-browse-graph {
+  flex-shrink: 0;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.dataflows-graph-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.dataflows-graph-modal {
+  width: min(32rem, 100%);
+  max-height: min(28rem, 85vh);
+  overflow: auto;
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  box-shadow: 0 12px 40px rgba(15, 23, 42, 0.18);
+  padding: 0.85rem 1rem 1rem;
+}
+
+.dataflows-graph-modal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.dataflows-graph-modal__title {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.dataflows-graph-modal__close {
+  padding: 0.25rem;
+}
+
+.dataflows-graph-modal__tabs {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.dataflows-graph-modal__tabs .btn.is-active {
+  font-weight: 700;
+  background: rgba(22, 163, 74, 0.12);
+}
+
+.dataflows-graph-modal__site-connect {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.dataflows-graph-modal__crumbs {
+  font-size: 0.78rem;
+  margin-bottom: 0.35rem;
+  flex-wrap: wrap;
+  display: flex;
+  align-items: center;
+}
+
+.dataflows-graph-crumb {
+  padding: 0.1rem 0.25rem;
+  min-height: 0;
+  font-size: inherit;
+}
+
+.dataflows-graph-modal__crumb-sep {
+  color: rgba(15, 23, 42, 0.35);
+}
+
+.dataflows-graph-modal__list-wrap {
+  min-height: 6rem;
+  max-height: 14rem;
+  overflow: auto;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 8px;
+  padding: 0.35rem;
+}
+
+.dataflows-graph-modal__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.dataflows-graph-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  padding: 0.3rem 0.35rem;
+  border-radius: 6px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.dataflows-graph-item--folder:hover,
+.dataflows-graph-item--file:hover {
+  background: rgba(23, 111, 90, 0.08);
+}
+
+.dataflows-graph-item--file {
+  color: rgb(22, 101, 52);
+  font-weight: 600;
+}
+
+.dataflows-graph-item--muted {
+  display: block;
+  padding: 0.3rem 0.35rem;
+  color: rgba(15, 23, 42, 0.45);
+  font-size: 0.85rem;
+}
+
+.dataflows-graph-modal__hint {
+  margin: 0.5rem 0 0;
+  font-size: 0.72rem;
+}
+
+.dataflows-field input,
+.dataflows-field select,
+.dataflows-field textarea {
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 500;
+  padding: 0.38rem 0.5rem;
+  border: 1px solid rgba(23, 111, 90, 0.25);
+  border-radius: 8px;
+  color: var(--color-text);
+}
+
+.dataflows-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.dataflows-actions {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.dataflows-preview-wrap {
+  overflow: auto;
+  max-height: 14rem;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: 8px;
+}
+
+.dataflows-wizard-shell .dataflows-preview-wrap {
+  max-height: min(78vh, 56rem);
+  flex: 1;
+  min-height: 10rem;
+}
+
+/* Step 2: Excel-like div grid (not <table>), Calibri-style gridlines */
+.dataflows-excel-preview {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  gap: 0.35rem;
+}
+
+.dataflows-excel-meta {
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+.dataflows-excel-scroll {
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+  border: 1px solid #8c8c8c;
+  border-radius: 2px;
+  background: #fff;
+}
+
+.dataflows-wizard-shell .dataflows-excel-scroll {
+  max-height: min(78vh, 56rem);
+}
+
+.dataflows-excel-sheet {
+  font-family: Calibri, "Segoe UI", system-ui, -apple-system, sans-serif;
+  font-size: 11px;
+  line-height: 1.28;
+  color: #000;
+  min-width: max-content;
+  background: #fff;
+}
+
+.dataflows-excel-row {
+  display: grid;
+  align-items: stretch;
+}
+
+.dataflows-excel-row--header .dataflows-excel-cell {
+  background: #f2f2f2;
+  font-weight: 600;
+}
+
+.dataflows-excel-row--data:nth-child(even) .dataflows-excel-cell:not(.dataflows-excel-gutter) {
+  background: #f9f9f9;
+}
+
+.dataflows-excel-gutter {
+  border-right: 1px solid #8c8c8c;
+  border-bottom: 1px solid #d4d4d4;
+  background: #f2f2f2;
+  color: #666;
+  text-align: right;
+  padding: 2px 6px;
+  font-size: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  user-select: none;
+}
+
+.dataflows-excel-cell {
+  border-right: 1px solid #d4d4d4;
+  border-bottom: 1px solid #d4d4d4;
+  padding: 2px 6px;
+  min-height: 1.35rem;
+  display: flex;
+  align-items: flex-start;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.dataflows-excel-cell--header {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.12rem;
+}
+
+.dataflows-excel-hname {
+  font-weight: 600;
+}
+
+.dataflows-excel-htype {
+  font-weight: 400;
+  font-size: 9px;
+  color: #555;
+}
+
+.dataflows-preview {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.72rem;
+}
+
+.dataflows-preview th,
+.dataflows-preview td {
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  padding: 0.25rem 0.35rem;
+  white-space: nowrap;
+}
+
+.dataflows-mappings-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 0.35rem;
+}
+
+.dataflows-map-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.75rem;
+}
+
+.dataflows-map-table th,
+.dataflows-map-table td {
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  padding: 0.2rem;
+}
+
+.dataflows-map-table input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.dataflows-runs {
+  list-style: none;
+  margin: 0.35rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.dataflows-run-detail {
+  margin-top: 0.5rem;
+  font-size: 0.82rem;
+}
+
+.dataflows-spin {
+  animation: dataflows-spin 0.9s linear infinite;
+  vertical-align: -0.15em;
+  margin-right: 0.25rem;
+}
+
+@keyframes dataflows-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { Building2, FolderKanban, LayoutGrid, MapPinned, Users } from "lucide-react";
+import { Building2, FolderKanban, GitBranch, LayoutGrid, MapPinned, Users } from "lucide-react";
 import { Trash2, X } from "lucide-react";
 import { api } from "../api/apiClient";
-import AdminPanel from "../components/AdminPanel";
+import CompanyDataflowsPanel from "../components/CompanyDataflowsPanel";
 import AdminUsersPanel from "../components/AdminUsersPanel";
 import PageHeader from "../components/PageHeader";
 import PropertyLegalStatusOptionsCard from "../components/PropertyLegalStatusOptionsCard";
@@ -73,7 +73,7 @@ export default function AdminPage() {
   useEffect(() => {
     setActiveTab((prev) => {
       if (!isSuperAdmin && prev === "companies") return "users";
-      if (!canOpenAdmin && prev === "users") return "structure";
+      if (!canOpenAdmin && (prev === "users" || prev === "dataflows")) return "structure";
       return prev;
     });
   }, [isSuperAdmin, canOpenAdmin]);
@@ -359,6 +359,19 @@ export default function AdminPage() {
         >
           Legal status lists
         </button>
+        {canOpenAdmin ? (
+          <button
+            type="button"
+            role="tab"
+            id="admin-tab-dataflows"
+            aria-selected={activeTab === "dataflows"}
+            className={`admin-page-tab${activeTab === "dataflows" ? " admin-page-tab--active" : ""}`}
+            onClick={() => setActiveTab("dataflows")}
+          >
+            <GitBranch size={14} style={{ marginRight: "0.25rem", verticalAlign: "-0.1em" }} aria-hidden />
+            Dataflows
+          </button>
+        ) : null}
       </div>
 
       {activeTab === "companies" && isSuperAdmin ? (
@@ -550,6 +563,14 @@ export default function AdminPage() {
         >
           <PropertyLegalStatusOptionsCard onListsChanged={loadPropertyListNames} />
         </div>
+      ) : null}
+
+      {activeTab === "dataflows" && canOpenAdmin ? (
+        <CompanyDataflowsPanel
+          workspaceCompanyId={workspaceCompanyId}
+          companies={companies}
+          isSuperAdmin={isSuperAdmin}
+        />
       ) : null}
 
       {modal?.type === "region" && (
