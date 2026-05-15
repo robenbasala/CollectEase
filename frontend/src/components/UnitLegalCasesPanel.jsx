@@ -318,11 +318,10 @@ export default function UnitLegalCasesPanel({ rowQuery, onUnitsRefresh }) {
   const [loadingStatusFor, setLoadingStatusFor] = useState(null);
   const [addStatusValue, setAddStatusValue] = useState("");
   const [addStatusNote, setAddStatusNote] = useState("");
-  const [addingStatus, setAddingStatus] = useState(false);
   const [closingId, setClosingId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
   const [followUpDraftByCase, setFollowUpDraftByCase] = useState({});
-  const [savingFollowUpId, setSavingFollowUpId] = useState(null);
+  const [savingCaseId, setSavingCaseId] = useState(null);
 
   /** "open" (default) | "closed" | "all" */
   const [caseFilter, setCaseFilter] = useState("open");
@@ -468,26 +467,49 @@ export default function UnitLegalCasesPanel({ rowQuery, onUnitsRefresh }) {
     }
   }
 
-  async function saveFollowUp(c) {
+  async function saveCaseDetails(c) {
     if (c.isClosed) return;
     const rawDraft = followUpDraftByCase[c.id];
     const inputVal = rawDraft !== undefined ? rawDraft : toDateInputValue(c.followUpAt);
     const curDay = c.followUpAt ? toDateInputValue(c.followUpAt) : "";
-    if (String(inputVal || "").trim() === String(curDay || "").trim()) {
+    const followUpChanged = String(inputVal || "").trim() !== String(curDay || "").trim();
+    const status = String(addStatusValue || "").trim();
+    const note = addStatusNote || null;
+
+    if (!followUpChanged && !status) {
+      setErr("Change follow-up date and/or pick a status to save.");
       return;
     }
-    setSavingFollowUpId(c.id);
+
+    setSavingCaseId(c.id);
     setErr("");
     try {
-      const nextIso = fromDateInputValue(String(inputVal || "").trim());
-      await api.patchDashboardLegalCase(c.id, { followUpAt: nextIso });
-      setFollowUpDraftByCase((p) => ({ ...p, [c.id]: toDateInputValue(nextIso) }));
+      const acc = await getActiveMsAccount();
+      const createdByName = (acc?.name || acc?.username || "").trim().slice(0, 256);
+
+      if (followUpChanged) {
+        const nextIso = fromDateInputValue(String(inputVal || "").trim());
+        await api.patchDashboardLegalCase(c.id, { followUpAt: nextIso });
+        setFollowUpDraftByCase((p) => ({ ...p, [c.id]: toDateInputValue(nextIso) }));
+      }
+
+      if (status) {
+        await api.postDashboardLegalCaseStatus(c.id, {
+          status,
+          note,
+          ...(createdByName ? { createdByName } : {})
+        });
+        setAddStatusValue("");
+        setAddStatusNote("");
+        await loadStatusesFor(c.id);
+      }
+
       await loadAll();
       onUnitsRefresh?.();
     } catch (e) {
-      setErr(e.message || "Could not update follow-up date");
+      setErr(e.message || "Could not save case");
     } finally {
-      setSavingFollowUpId(null);
+      setSavingCaseId(null);
     }
   }
 
@@ -518,34 +540,6 @@ export default function UnitLegalCasesPanel({ rowQuery, onUnitsRefresh }) {
       setErr(e.message || "Could not delete case");
     } finally {
       setDeletingId(null);
-    }
-  }
-
-  async function addStatusToCase(c) {
-    const status = String(addStatusValue || "").trim();
-    if (!status) {
-      setErr("Pick a status to log");
-      return;
-    }
-    setAddingStatus(true);
-    setErr("");
-    try {
-      const acc = await getActiveMsAccount();
-      const createdByName = (acc?.name || acc?.username || "").trim().slice(0, 256);
-      await api.postDashboardLegalCaseStatus(c.id, {
-        status,
-        note: addStatusNote || null,
-        ...(createdByName ? { createdByName } : {})
-      });
-      setAddStatusValue("");
-      setAddStatusNote("");
-      await Promise.all([loadStatusesFor(c.id), loadAll()]);
-      setExpandedId(null);
-      onUnitsRefresh?.();
-    } catch (e) {
-      setErr(e.message || "Could not log status");
-    } finally {
-      setAddingStatus(false);
     }
   }
 
@@ -779,42 +773,33 @@ export default function UnitLegalCasesPanel({ rowQuery, onUnitsRefresh }) {
                         <div className="ud-cases__followup-edit">
                           <label className="ud-cases__field ud-cases__field--wide">
                             <span>Follow-up date</span>
-                            <div className="ud-cases__followup-edit-row">
-                              <input
-                                type="date"
-                                className="ud-cases__followup-date-input"
-                                value={
-                                  followUpDraftByCase[c.id] !== undefined
-                                    ? followUpDraftByCase[c.id]
-                                    : toDateInputValue(c.followUpAt)
-                                }
-                                onChange={(e) =>
-                                  setFollowUpDraftByCase((prev) => ({
-                                    ...prev,
-                                    [c.id]: e.target.value
-                                  }))
-                                }
-                                disabled={savingFollowUpId === c.id}
-                              />
-                              <button
-                                type="button"
-                                className="btn btn-primary ud-cases__followup-save"
-                                disabled={savingFollowUpId === c.id}
-                                onClick={() => void saveFollowUp(c)}
-                              >
-                                {savingFollowUpId === c.id ? "Saving…" : "Save"}
-                              </button>
-                            </div>
+                            <input
+                              type="date"
+                              className="ud-cases__followup-date-input"
+                              value={
+                                followUpDraftByCase[c.id] !== undefined
+                                  ? followUpDraftByCase[c.id]
+                                  : toDateInputValue(c.followUpAt)
+                              }
+                              onChange={(e) =>
+                                setFollowUpDraftByCase((prev) => ({
+                                  ...prev,
+                                  [c.id]: e.target.value
+                                }))
+                              }
+                              disabled={savingCaseId === c.id}
+                            />
                           </label>
                         </div>
                       ) : null}
 
                       <div className="ud-cases__add-status">
-                        <div className="ud-cases__add-row">
+                        <label className="ud-cases__field ud-cases__field--wide">
+                          <span>Status</span>
                           <select
                             value={addStatusValue}
                             onChange={(e) => setAddStatusValue(e.target.value)}
-                            disabled={addingStatus || c.isClosed}
+                            disabled={savingCaseId === c.id || c.isClosed}
                           >
                             <option value="">— Pick status —</option>
                             {options.map((o) => (
@@ -823,16 +808,7 @@ export default function UnitLegalCasesPanel({ rowQuery, onUnitsRefresh }) {
                               </option>
                             ))}
                           </select>
-                          <button
-                            type="button"
-                            className="btn btn-primary"
-                            disabled={addingStatus || !addStatusValue || c.isClosed}
-                            onClick={() => void addStatusToCase(c)}
-                            title={c.isClosed ? "Reopen the case to log new status" : "Log status"}
-                          >
-                            {addingStatus ? "…" : "Log status"}
-                          </button>
-                        </div>
+                        </label>
                         <textarea
                           className="ud-cases__add-note"
                           rows={2}
@@ -840,7 +816,7 @@ export default function UnitLegalCasesPanel({ rowQuery, onUnitsRefresh }) {
                           value={addStatusNote}
                           onChange={(e) => setAddStatusNote(e.target.value)}
                           maxLength={4000}
-                          disabled={addingStatus || c.isClosed}
+                          disabled={savingCaseId === c.id || c.isClosed}
                         />
                       </div>
 
@@ -863,10 +839,23 @@ export default function UnitLegalCasesPanel({ rowQuery, onUnitsRefresh }) {
                         </ul>
                       )}
 
+                      {!c.isClosed ? (
+                        <div className="ud-cases__save-row">
+                          <button
+                            type="button"
+                            className="btn btn-primary ud-cases__save-all"
+                            disabled={savingCaseId === c.id}
+                            onClick={() => void saveCaseDetails(c)}
+                          >
+                            {savingCaseId === c.id ? "Saving…" : "Save"}
+                          </button>
+                        </div>
+                      ) : null}
+
                       <div className="ud-cases__case-actions">
                         <button
                           type="button"
-                          className="btn btn-ghost"
+                          className={`btn btn-ghost ud-cases__close-case${c.isClosed ? "" : " ud-cases__close-case--danger"}`}
                           disabled={closingId === c.id}
                           onClick={() => void toggleCaseClosed(c)}
                         >

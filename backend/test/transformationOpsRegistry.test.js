@@ -68,12 +68,17 @@ describe("transformationOpsRegistry", () => {
     assert.ok(warnings.some((w) => /columns/.test(w.problem)));
   });
 
-  it("buildCollectionReportCleanupPipeline uses renamed columns in filterExpr", () => {
+  it("buildCollectionReportCleanupPipeline skips title rows then promotes headers", () => {
     const cols = ["Collection Report Standard", "Collection Report Standard_2", "Collection Report Standard_3"];
     const p = reg.buildCollectionReportCleanupPipeline(cols);
-    assert.equal(p.steps[1].op, "rename");
-    assert.ok(p.steps[2].expression.includes("TenantId"));
-    assert.ok(p.steps[2].expression.includes("Unit"));
+    assert.equal(p.steps[0].op, "removeTopRows");
+    assert.equal(p.steps[0].count, 5);
+    assert.equal(p.steps[1].op, "promoteHeaders");
+    const rename = p.steps.find((s) => s.op === "rename");
+    assert.ok(rename.map.Code === "TenantId");
+    const filter = p.steps.find((s) => s.op === "filterExpr");
+    assert.ok(filter.expression.includes("TenantId"));
+    assert.ok(filter.expression.includes("Unit"));
   });
 });
 
@@ -146,19 +151,16 @@ describe("runTransformationEngine", () => {
   });
 
   it("runs collection-style cleanup pipeline", () => {
-    const cols = ["Collection Report Standard", "Collection Report Standard_2", "Collection Report Standard_3"];
+    const cols = ["A", "B", "C"];
     const script = JSON.stringify(reg.buildCollectionReportCleanupPipeline(cols));
     const rows = [
-      {
-        "Collection Report Standard": "Unit",
-        "Collection Report Standard_2": "Code",
-        "Collection Report Standard_3": "Name"
-      },
-      {
-        "Collection Report Standard": "704",
-        "Collection Report Standard_2": "t1",
-        "Collection Report Standard_3": "Ann"
-      }
+      { A: "Collection Report Standard", B: "", C: "" },
+      { A: "Property filter", B: "", C: "" },
+      { A: "", B: "", C: "" },
+      { A: "", B: "", C: "" },
+      { A: "Tenant", B: "Market", C: "Actual" },
+      { A: "Unit", B: "Code", C: "Name" },
+      { A: "704", B: "t1", C: "Ann" }
     ];
     const out = runTransformationEngine(script, rows);
     assert.equal(out.ok, true);

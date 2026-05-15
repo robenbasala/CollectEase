@@ -184,6 +184,65 @@ const TRANSFORMATION_OPS = {
     affects: "columns",
     fields: [],
     example: { op: "promoteHeaders" }
+  },
+  removeEmptyRows: {
+    op: "removeEmptyRows",
+    label: "Remove empty rows",
+    description: "Removes rows where every column is blank.",
+    affects: "rows",
+    fields: [],
+    example: { op: "removeEmptyRows" }
+  },
+  removeEmptyColumns: {
+    op: "removeEmptyColumns",
+    label: "Remove empty columns",
+    description: "Removes columns where every row is blank.",
+    affects: "columns",
+    fields: [],
+    example: { op: "removeEmptyColumns" }
+  },
+  cleanText: {
+    op: "cleanText",
+    label: "Clean all text",
+    description: "Trims and normalizes whitespace on every string cell (all columns).",
+    affects: "rows",
+    fields: [],
+    example: { op: "cleanText" }
+  },
+  filterRows: {
+    op: "filterRows",
+    label: "Filter rows",
+    description: "Filter by column with operators: notEmpty, empty, equals, contains, greaterThan, etc.",
+    affects: "rows",
+    fields: [{ name: "where", type: "object", required: true }],
+    example: { op: "filterRows", where: { column: "Unit", operator: "notEmpty" } }
+  },
+  normalizeDate: {
+    op: "normalizeDate",
+    label: "Normalize dates",
+    description: "Parse date columns to ISO date strings (YYYY-MM-DD).",
+    affects: "rows",
+    fields: [{ name: "columns", type: "array", required: true, itemType: "string" }],
+    example: { op: "normalizeDate", columns: ["DOB"] }
+  },
+  normalizeMoney: {
+    op: "normalizeMoney",
+    label: "Normalize money",
+    description: "Strip $ and commas; handle (1,200) as negative numbers.",
+    affects: "rows",
+    fields: [{ name: "columns", type: "array", required: true, itemType: "string" }],
+    example: { op: "normalizeMoney", columns: ["Balance"] }
+  },
+  deduplicate: {
+    op: "deduplicate",
+    label: "Deduplicate rows",
+    description: "Keep first or last row per key columns.",
+    affects: "rows",
+    fields: [
+      { name: "columns", type: "array", required: true, itemType: "string" },
+      { name: "keep", type: "string", required: false }
+    ],
+    example: { op: "deduplicate", columns: ["uniqueid"], keep: "first" }
   }
 };
 
@@ -202,10 +261,16 @@ const EXPR_HELPER_FUNCTIONS = [
 
 const SUPPORTED_OP_LIST = Object.keys(TRANSFORMATION_OPS);
 
-/** Map alternate op names to registry keys. */
+/** Map alternate op / type names to engine op keys. */
 const OP_NAME_ALIASES = {
   drop: "removeColumns",
-  skipRows: "removeTopRows"
+  skipRows: "removeTopRows",
+  renameColumns: "rename",
+  keepColumns: "select",
+  replaceValue: "replaceValues",
+  convertTypes: "coerceTypes",
+  addCalculatedColumn: "addExprColumn",
+  filterRows: "filterRows"
 };
 
 function canonicalOpName(op) {
@@ -228,10 +293,12 @@ function opMeta(op) {
  */
 function normalizeStep(step) {
   if (!step || typeof step !== "object") return step;
-  let op = String(step.op || "").trim();
+  let op = String(step.op || step.type || "").trim();
+  op = canonicalOpName(op);
   if (op === "skipRows") op = "removeTopRows";
   if (op === "drop") op = "removeColumns";
   const out = { ...step, op };
+  delete out.type;
   if (op === "rename") {
     if ((!out.map || typeof out.map !== "object") && out.columns && typeof out.columns === "object") {
       out.map = out.columns;
@@ -603,18 +670,30 @@ const COLLECTION_REPORT_TARGETS = ["Unit", "TenantId", "TenantName", "MarketRent
  * @returns {object} pipeline object
  */
 function buildCollectionReportCleanupPipeline(previewColumns) {
-  const hints = buildExprColumnHints(previewColumns || [], []);
-  /** @type {Record<string, string>} */
-  const map = {};
-  for (let i = 0; i < COLLECTION_REPORT_TARGETS.length; i++) {
-    const from = hints[i]?.raw || COLLECTION_REPORT_DEFAULTS[i];
-    if (from) map[from] = COLLECTION_REPORT_TARGETS[i];
-  }
+  void previewColumns;
+  /** After removeTopRows(5) + promoteHeaders, headers match Yardi-style collection report row 6. */
+  const renameMap = {
+    Code: "TenantId",
+    Name: "TenantName",
+    Rent: "MarketRent",
+    Rent__2: "ActualRent",
+    Balance: "Balance",
+    Lastpaymentdate: "LastPaymentDate",
+    Lastpaymentamount: "LastPaymentAmount",
+    Hmyperson: "Hmyperson",
+    Office: "Office",
+    Home: "Home",
+    Mobile: "Mobile",
+    Email: "Email",
+    Expiration: "Expiration"
+  };
   return {
     version: 1,
     steps: [
+      { op: "removeTopRows", count: 5 },
+      { op: "promoteHeaders" },
       { op: "trimAll" },
-      { op: "rename", map },
+      { op: "rename", map: renameMap },
       {
         op: "filterExpr",
         expression: `not IsBlank(Unit) and Unit != 'Unit' and TenantId != 'Code' and TenantName != 'Name'`

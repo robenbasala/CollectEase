@@ -99,7 +99,14 @@ function applyStep(rows, step, ctx) {
   if (!op) throw new Error("Each step requires op");
 
   if (op === "useSheet") {
-    const sn = String(step.sheet || "").trim();
+    let sn = step.sheet;
+    if (typeof sn === "number" && ctx.sheets) {
+      const names = Object.keys(ctx.sheets);
+      const idx = sn >= 1 ? Math.floor(sn) - 1 : Math.floor(sn);
+      sn = names[idx] ?? names[0] ?? "";
+    } else {
+      sn = String(sn ?? "").trim();
+    }
     if (!ctx.sheets || !Object.prototype.hasOwnProperty.call(ctx.sheets, sn)) {
       throw new Error(
         `Unknown sheet "${sn}". Available: ${ctx.sheets ? Object.keys(ctx.sheets).join(", ") : "(none)"}`
@@ -207,11 +214,15 @@ function applyStep(rows, step, ctx) {
       const col = String(step.column || "");
       const from = step.from != null ? String(step.from) : "";
       const to = step.to != null ? String(step.to) : "";
+      const allCols = col === "*" || col === "";
       return rows.map((row) => {
         const o = { ...row };
-        if (!col || !Object.prototype.hasOwnProperty.call(o, col)) return o;
-        const s = cellText(o[col]);
-        o[col] = from === "" ? s : s.split(from).join(to);
+        const keys = allCols ? Object.keys(o) : [col];
+        for (const k of keys) {
+          if (!Object.prototype.hasOwnProperty.call(o, k)) continue;
+          const s = cellText(o[k]);
+          o[k] = from === "" ? s : s.split(from).join(to);
+        }
         return o;
       });
     }
@@ -334,9 +345,151 @@ function applyStep(rows, step, ctx) {
         return { ...row, [outName]: v };
       });
     }
+    case "removeEmptyRows":
+      return rows.filter((row) => {
+        return Object.values(row).some((v) => cellText(v).trim() !== "");
+      });
+    case "removeEmptyColumns": {
+      if (!rows.length) return rows;
+      const keys = Object.keys(rows[0]);
+      const keep = keys.filter((k) => rows.some((r) => cellText(r[k]).trim() !== ""));
+      return rows.map((row) => {
+        const o = {};
+        for (const k of keep) o[k] = row[k];
+        return o;
+      });
+    }
+    case "cleanText":
+      return rows.map((row) => {
+        const o = {};
+        for (const [k, v] of Object.entries(row)) {
+          if (v == null) {
+            o[k] = v;
+            continue;
+          }
+          let s = cellText(v);
+          s = s.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "");
+          s = s.replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
+          o[k] = s;
+        }
+        return o;
+      });
+    case "filterRows": {
+      const where = step.where && typeof step.where === "object" ? step.where : {};
+      const col = String(where.column || "");
+      if (!col) throw new Error("filterRows requires where.column");
+      const operator = String(where.operator || "notEmpty");
+      const val = where.value;
+      return rows.filter((row) => {
+        const v = row[col];
+        const t = cellText(v).trim();
+        const n = Number(String(t).replace(/,/g, ""));
+        const cmp = val != null ? String(val) : "";
+        switch (operator) {
+          case "notEmpty":
+            return t !== "";
+          case "empty":
+            return t === "";
+          case "equals":
+            return t === cmp;
+          case "notEquals":
+            return t !== cmp;
+          case "contains":
+            return t.toLowerCase().includes(cmp.toLowerCase());
+          case "notContains":
+            return !t.toLowerCase().includes(cmp.toLowerCase());
+          case "startsWith":
+            return t.toLowerCase().startsWith(cmp.toLowerCase());
+          case "endsWith":
+            return t.toLowerCase().endsWith(cmp.toLowerCase());
+          case "greaterThan":
+            return Number.isFinite(n) && Number.isFinite(Number(cmp)) && n > Number(cmp);
+          case "greaterThanOrEqual":
+            return Number.isFinite(n) && Number.isFinite(Number(cmp)) && n >= Number(cmp);
+          case "lessThan":
+            return Number.isFinite(n) && Number.isFinite(Number(cmp)) && n < Number(cmp);
+          case "lessThanOrEqual":
+            return Number.isFinite(n) && Number.isFinite(Number(cmp)) && n <= Number(cmp);
+          default:
+            return true;
+        }
+      });
+    }
+    case "normalizeDate": {
+      const cols = new Set((Array.isArray(step.columns) ? step.columns : []).map(String));
+      return rows.map((row) => {
+        const o = { ...row };
+        for (const c of cols) {
+          if (!Object.prototype.hasOwnProperty.call(o, c)) continue;
+          const raw = cellText(o[c]).trim();
+          if (!raw) {
+            o[c] = null;
+            continue;
+          }
+          const d = new Date(raw);
+          if (!Number.isNaN(d.getTime())) {
+            o[c] = d.toISOString().slice(0, 10);
+          }
+        }
+        return o;
+      });
+    }
+    case "normalizeMoney": {
+      const cols = new Set((Array.isArray(step.columns) ? step.columns : []).map(String));
+      return rows.map((row) => {
+        const o = { ...row };
+        for (const c of cols) {
+          if (!Object.prototype.hasOwnProperty.call(o, c)) continue;
+          let s = cellText(o[c]).trim();
+          if (!s) {
+            o[c] = null;
+            continue;
+          }
+          let neg = false;
+          if (s.startsWith("(") && s.endsWith(")")) {
+            neg = true;
+            s = s.slice(1, -1);
+          }
+          s = s.replace(/[$,\s]/g, "");
+          const num = Number(s);
+          o[c] = Number.isFinite(num) ? (neg ? -num : num) : o[c];
+        }
+        return o;
+      });
+    }
+    case "deduplicate": {
+      const cols = (Array.isArray(step.columns) ? step.columns : []).map(String);
+      if (!cols.length) throw new Error("deduplicate requires columns");
+      const keep = String(step.keep || "first").toLowerCase() === "last" ? "last" : "first";
+      const keyOf = (row) => cols.map((c) => cellText(row[c])).join("\x1f");
+      if (keep === "last") {
+        const seen = new Set();
+        const out = [];
+        for (let i = rows.length - 1; i >= 0; i--) {
+          const k = keyOf(rows[i]);
+          if (seen.has(k)) continue;
+          seen.add(k);
+          out.unshift(rows[i]);
+        }
+        return out.map((r) => ({ ...r }));
+      }
+      const seen = new Set();
+      const out = [];
+      for (const row of rows) {
+        const k = keyOf(row);
+        if (seen.has(k)) continue;
+        seen.add(k);
+        out.push({ ...row });
+      }
+      return out;
+    }
     default:
       throw new Error(`Unknown transformation op: ${op}`);
   }
+}
+
+function stepIsDisabled(step) {
+  return step && (step.enabled === false || step.disabled === true);
 }
 
 function parsePipeline(scriptText) {
@@ -352,8 +505,11 @@ function parsePipeline(scriptText) {
     e.code = "PARSE";
     throw e;
   }
+  if (Array.isArray(obj)) {
+    return { version: 1, steps: obj };
+  }
   if (!obj || typeof obj !== "object") {
-    throw new Error("Invalid pipeline: expected object");
+    throw new Error("Invalid pipeline: expected object or array of steps");
   }
   const steps = Array.isArray(obj.steps) ? obj.steps : [];
   return { version: Number(obj.version) || 1, steps };
@@ -396,6 +552,7 @@ function runTransformationEngine(scriptText, rows, options = {}) {
   try {
     for (let i = 0; i < pipeline.steps.length; i++) {
       const step = pipeline.steps[i];
+      if (stepIsDisabled(step)) continue;
       out = applyStep(out, step, ctx);
     }
   } catch (e) {
@@ -407,6 +564,7 @@ function runTransformationEngine(scriptText, rows, options = {}) {
       const step = pipeline.steps[i];
       rawOp = step && typeof step === "object" ? String(step.op || "").trim() : "";
       try {
+        if (stepIsDisabled(step)) continue;
         partial = applyStep(partial, step, ctx);
       } catch (inner) {
         failedIdx = i + 1;

@@ -15,19 +15,9 @@ import {
 import { api } from "../api/apiClient";
 import { getActiveMsAccount } from "../microsoft/msGraphMail";
 import LegalStatusCell from "./LegalStatusCell";
+import { buildErpDeepLink, erpLinkIdFromUnit, hmypersonFromUnit, tenantCodeFromUnit } from "../lib/erpDeepLink";
 import { formatPhoneDisplay, formatProperName } from "../lib/tenantDisplayFormat";
 import UnitLegalCasesPanel from "./UnitLegalCasesPanel";
-
-function tenantCodeFromUnit(u) {
-  if (!u || typeof u !== "object") return "";
-  for (const k of Object.keys(u)) {
-    if (k.toLowerCase() === "tenantcode") {
-      const v = u[k];
-      return v == null ? "" : String(v).trim();
-    }
-  }
-  return "";
-}
 
 function formatMoney(n) {
   const v = Number(n);
@@ -63,14 +53,6 @@ function noteSourceOf(n) {
   return n && String(n.noteSource).toLowerCase() === "auto" ? "auto" : "manual";
 }
 
-function buildTenantDeepLink(staticPart, tenantCode) {
-  if (!staticPart || typeof staticPart !== "string") return null;
-  const base = staticPart.trim();
-  if (!base || !tenantCode) return null;
-  const code = String(tenantCode).trim();
-  if (!code) return null;
-  return `${base}${code}`;
-}
 
 export default function UnitDetailRowModal({
   open,
@@ -81,8 +63,8 @@ export default function UnitDetailRowModal({
   onOpenPaymentReminder,
   onUnitsRefresh
 }) {
-  const [nextFollowInput, setNextFollowInput] = useState("");
-  const [savingFollow, setSavingFollow] = useState(false);
+  const [tenantFollowInput, setTenantFollowInput] = useState("");
+  const [savingTenantFollow, setSavingTenantFollow] = useState(false);
   const [err, setErr] = useState("");
   const [notes, setNotes] = useState([]);
   const [noteDraft, setNoteDraft] = useState("");
@@ -96,6 +78,7 @@ export default function UnitDetailRowModal({
   const [noteFilter, setNoteFilter] = useState("all");
 
   const tc = useMemo(() => (unit ? tenantCodeFromUnit(unit) : ""), [unit]);
+  const hmy = useMemo(() => (unit ? hmypersonFromUnit(unit) : ""), [unit]);
 
   const rowQuery = useMemo(() => {
     if (!unit) return null;
@@ -136,7 +119,7 @@ export default function UnitDetailRowModal({
       setErr("");
       return;
     }
-    setNextFollowInput(toDateInputValue(unit.nextFollowUp));
+    setTenantFollowInput(toDateInputValue(unit.tenantFollowUp));
     void loadNotes();
   }, [open, unit, loadNotes]);
 
@@ -145,21 +128,21 @@ export default function UnitDetailRowModal({
     return notes.filter((x) => noteSourceOf(x) === noteFilter);
   }, [notes, noteFilter]);
 
-  async function saveFollowUp() {
+  async function saveTenantFollowUp() {
     if (!rowQuery) return;
-    setSavingFollow(true);
+    setSavingTenantFollow(true);
     setErr("");
     try {
-      const iso = fromDateInputValue(nextFollowInput);
+      const iso = fromDateInputValue(tenantFollowInput);
       await api.patchDashboardUnitRow({
         ...rowQuery,
-        nextFollowUp: iso
+        tenantFollowUp: iso
       });
       onUnitsRefresh?.();
     } catch (e) {
       setErr(e.message || "Save failed");
     } finally {
-      setSavingFollow(false);
+      setSavingTenantFollow(false);
     }
   }
 
@@ -266,7 +249,7 @@ export default function UnitDetailRowModal({
 
   if (!open || !unit) return null;
 
-  const erpHref = buildTenantDeepLink(erpStaticLink, tc);
+  const erpHref = buildErpDeepLink(erpStaticLink, erpLinkIdFromUnit(unit));
   const phone = unit.phone ?? unit.PhomeNumber ?? unit.phomeNumber ?? "";
 
   return (
@@ -311,6 +294,14 @@ export default function UnitDetailRowModal({
                 <input readOnly value={formatProperName(unit.name ?? "")} />
               </div>
               <div className="ud-row-modal__field">
+                <label>Tenant code</label>
+                <input readOnly value={tc || "—"} />
+              </div>
+              <div className="ud-row-modal__field">
+                <label>Hmyperson</label>
+                <input readOnly value={hmy || "—"} />
+              </div>
+              <div className="ud-row-modal__field">
                 <label>Balance</label>
                 <input readOnly value={formatMoney(unit.balance)} />
               </div>
@@ -341,33 +332,43 @@ export default function UnitDetailRowModal({
             </div>
 
             <div className="ud-row-modal__actions-block">
-              <label className="ud-row-modal__inline-label">Next follow up</label>
+              <label className="ud-row-modal__inline-label">Next legal follow up</label>
+              <input
+                type="text"
+                className="ud-row-modal__date ud-row-modal__date--readonly"
+                readOnly
+                value={formatDate(unit.nextFollowUp)}
+                title="Next legal follow up — from import and open legal cases (not editable)"
+              />
+              <p className="ud-row-modal__hint text-muted">Next legal follow up — earliest of import and open case follow-ups.</p>
+
+              <label className="ud-row-modal__inline-label ud-row-modal__inline-label--spaced">Tenant follow up</label>
               <div className="ud-row-modal__follow-row">
                 <input
                   type="date"
                   className="ud-row-modal__date"
-                  value={nextFollowInput}
-                  onChange={(e) => setNextFollowInput(e.target.value)}
+                  value={tenantFollowInput}
+                  onChange={(e) => setTenantFollowInput(e.target.value)}
                 />
                 <button
                   type="button"
                   className="btn btn-primary ud-row-modal__iconbtn"
-                  disabled={savingFollow}
-                  title="Save follow-up date"
-                  onClick={() => void saveFollowUp()}
+                  disabled={savingTenantFollow}
+                  title="Save tenant follow-up"
+                  onClick={() => void saveTenantFollowUp()}
                 >
                   <Calendar size={18} />
                 </button>
                 <button
                   type="button"
                   className="btn btn-ghost ud-row-modal__iconbtn"
-                  title="Reset from row"
-                  onClick={() => setNextFollowInput(toDateInputValue(unit.nextFollowUp))}
+                  title="Reset"
+                  onClick={() => setTenantFollowInput(toDateInputValue(unit.tenantFollowUp))}
                 >
                   <RefreshCw size={18} />
                 </button>
               </div>
-              <p className="ud-row-modal__hint text-muted">Saves to the dashboard table for this tenant.</p>
+              <p className="ud-row-modal__hint text-muted">Your follow-up — saved on the dashboard for this tenant.</p>
 
               <div className="ud-row-modal__current-legal">
                 <span className="text-muted">Current legal status</span>

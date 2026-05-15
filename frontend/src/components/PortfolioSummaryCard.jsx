@@ -96,9 +96,9 @@ export default function PortfolioSummaryCard({ region, portfolio }) {
               <tr>
                 <th className="th-collection-sub th-collection-sub--lt1">Less than 1 month</th>
                 <th className="th-collection-sub th-collection-sub--ge1">1 month or more</th>
-                <th className="th-alerts-sub">Missing follow up</th>
-                <th className="th-alerts-sub">Past due follow up</th>
-                <th className="th-alerts-sub">Due today follow up</th>
+                <th className="th-alerts-sub">Missing legal follow up</th>
+                <th className="th-alerts-sub">Past due legal follow up</th>
+                <th className="th-alerts-sub">Due today legal follow up</th>
                 <th className="th-alerts-sub">Requires legal</th>
                 <th className="th-alerts-sub">Remove legal</th>
                 <th className="th-delinquent-sub" title="Rent &gt; 0 and balance ≤ 0">
@@ -179,7 +179,7 @@ export default function PortfolioSummaryCard({ region, portfolio }) {
                     <td className="td-alert-count">
                       <DashboardCellButton
                         className="tabular-nums"
-                        title="Missing follow up"
+                        title="Missing legal follow up"
                         onNavigate={() => go(p.property, { alert: "missingFollowUp" })}
                       >
                         {missingFu > 0 ? <span className="alert-count-hot">{missingFu}</span> : <span>0</span>}
@@ -188,7 +188,7 @@ export default function PortfolioSummaryCard({ region, portfolio }) {
                     <td className="td-alert-count">
                       <DashboardCellButton
                         className="tabular-nums"
-                        title="Past due follow up"
+                        title="Past due legal follow up"
                         onNavigate={() => go(p.property, { alert: "pastDueFollowUp" })}
                       >
                         {pastDue > 0 ? <span className="alert-count-hot">{pastDue}</span> : <span>0</span>}
@@ -197,7 +197,7 @@ export default function PortfolioSummaryCard({ region, portfolio }) {
                     <td className="td-alert-count">
                       <DashboardCellButton
                         className="tabular-nums"
-                        title="Due today follow up"
+                        title="Due today legal follow up"
                         onNavigate={() => go(p.property, { alert: "dueTodayFollowUp" })}
                       >
                         {dueToday > 0 ? <span className="alert-count-hot">{dueToday}</span> : <span>0</span>}

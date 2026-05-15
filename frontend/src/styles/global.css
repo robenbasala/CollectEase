@@ -904,13 +904,11 @@ table.data-table tbody tr:hover {
   letter-spacing: 0.02em;
   line-height: 1.25;
   white-space: nowrap;
-  color: #fff;
-  background: linear-gradient(135deg, #fbbf24 0%, #fb923c 45%, #ea580c 100%);
-  border: 1px solid rgba(234, 88, 12, 0.55);
-  box-shadow:
-    0 1px 2px rgba(124, 45, 18, 0.18),
-    0 0 0 1px rgba(255, 255, 255, 0.35) inset;
-  text-shadow: 0 1px 1px rgba(124, 45, 18, 0.35);
+  color: #166534;
+  background: rgba(22, 163, 74, 0.12);
+  border: 1px solid rgba(22, 163, 74, 0.45);
+  box-shadow: none;
+  text-shadow: none;
 }
 
 .ud-legal-status-cell--compact .ud-legal-status-cell__text {
@@ -4761,6 +4759,7 @@ select.auth-field__input {
 .ud-row-modal__grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 0.95fr) minmax(0, 1fr);
+  align-items: stretch;
   gap: 0.85rem;
   padding: 0.85rem 1rem 1rem;
   overflow: auto;
@@ -4877,6 +4876,16 @@ select.auth-field__input {
   border-radius: 10px;
   border: 1px solid rgba(15, 23, 42, 0.14);
   background: #fff;
+}
+
+.ud-row-modal__date--readonly {
+  width: 100%;
+  background: rgba(15, 23, 42, 0.04);
+  cursor: default;
+}
+
+.ud-row-modal__inline-label--spaced {
+  margin-top: 0.65rem;
 }
 
 .ud-row-modal__iconbtn {
@@ -5308,6 +5317,8 @@ select.auth-field__input {
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
+  flex: 1;
+  min-height: 0;
 }
 
 .ud-cases__head {
@@ -5621,6 +5632,7 @@ select.auth-field__input {
   justify-content: space-between;
   gap: 0.4rem;
   margin-top: 0.25rem;
+  flex-shrink: 0;
 }
 
 .ud-cases__refresh {
@@ -5683,15 +5695,15 @@ select.auth-field__input {
   box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.2);
 }
 
-/* Closed: red, mirrors the closed-case tint. */
+/* Closed: white when inactive (same as All); red when active. */
 .ud-cases-filter-badge--closed {
-  background: rgba(220, 38, 38, 0.08);
-  border-color: rgba(220, 38, 38, 0.4);
-  color: #991b1b;
+  background: #fff;
+  border-color: rgba(15, 23, 42, 0.4);
+  color: #0f172a;
 }
 
 .ud-cases-filter-badge--closed:hover {
-  background: rgba(220, 38, 38, 0.16);
+  background: rgba(15, 23, 42, 0.06);
 }
 
 .ud-cases-filter-badge--closed.is-active {
@@ -5706,8 +5718,44 @@ select.auth-field__input {
   cursor: default;
 }
 
+.ud-row-modal__panel--legal {
+  min-height: 0;
+  overflow: hidden;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+}
+
+.ud-row-modal__panel--legal .ud-cases {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.ud-cases__head {
+  flex-shrink: 0;
+}
+
+.ud-cases__new-form {
+  flex-shrink: 0;
+}
+
+/* Legal list: fill panel to bottom (override .ud-row-modal__scrollbox max-height). */
+.ud-row-modal__scrollbox.ud-cases__list-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .ud-cases__list-scroll {
-  max-height: 320px;
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
   overflow-y: auto;
 }
 
@@ -5853,9 +5901,8 @@ select.auth-field__input {
 }
 
 .ud-cases__followup-date-input {
-  flex: 1 1 10rem;
+  width: 100%;
   min-width: 0;
-  max-width: 14rem;
 }
 
 .ud-cases__followup-save {
@@ -5978,6 +6025,26 @@ select.auth-field__input {
   gap: 0.3rem;
   padding: 0.3rem 0.6rem;
   font-size: 0.78rem;
+}
+
+.ud-cases__save-row {
+  display: flex;
+  justify-content: center;
+  padding: 0.35rem 0 0.15rem;
+}
+
+.ud-cases__save-all {
+  min-width: 7.5rem;
+  padding: 0.42rem 1.25rem;
+  font-weight: 600;
+}
+
+.ud-cases__close-case--danger {
+  color: #b42318 !important;
+}
+
+.ud-cases__close-case--danger:hover {
+  background: rgba(180, 35, 24, 0.08) !important;
 }
 
 .ud-cases__delete {
@@ -6448,6 +6515,127 @@ select.auth-field__input {
   flex-wrap: wrap;
   gap: 0.45rem;
   align-items: flex-end;
+}
+
+.dataflows-etl-toolbar {
+  margin: 0.35rem 0 0.5rem;
+}
+
+.dataflows-etl-toolbar__title {
+  font-size: 0.82rem;
+  margin: 0 0 0.4rem;
+}
+
+.dataflows-etl-toolbar__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr));
+  gap: 0.35rem;
+}
+
+.dataflows-etl-toolbar__btn {
+  justify-content: flex-start;
+  text-align: left;
+  white-space: normal;
+  line-height: 1.25;
+  min-height: 2.1rem;
+}
+
+.dataflows-transform-steps-panel {
+  margin: 0.5rem 0 0.65rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: 10px;
+  background: rgba(248, 250, 252, 0.85);
+}
+
+.dataflows-transform-steps-panel__title {
+  margin: 0 0 0.45rem;
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.dataflows-step-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.dataflows-step-list-empty {
+  margin: 0;
+  font-size: 0.84rem;
+}
+
+.dataflows-step-list__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.4rem 0.5rem;
+  border-radius: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: #fff;
+}
+
+.dataflows-step-list__item.is-disabled {
+  opacity: 0.62;
+}
+
+.dataflows-step-list__main {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.dataflows-step-list__num {
+  flex-shrink: 0;
+  width: 1.35rem;
+  height: 1.35rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(59, 130, 246, 0.12);
+  color: #1d4ed8;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.dataflows-step-list__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.dataflows-step-list__body strong {
+  font-size: 0.86rem;
+  line-height: 1.25;
+}
+
+.dataflows-step-list__op {
+  font-size: 0.72rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.dataflows-step-list__badge {
+  display: inline-block;
+  margin-top: 0.15rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #b45309;
+}
+
+.dataflows-step-list__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem;
+  flex-shrink: 0;
 }
 
 .dataflows-step-builder {
@@ -6940,6 +7128,11 @@ select.auth-field__input {
 }
 
 /* Step 2: Excel-like div grid (not <table>), Calibri-style gridlines */
+.dataflows-excel-preview--raw .dataflows-excel-cell--header .dataflows-excel-hname {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+}
+
 .dataflows-excel-preview {
   display: flex;
   flex-direction: column;

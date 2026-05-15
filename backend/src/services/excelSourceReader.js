@@ -82,6 +82,18 @@ function normalizeCellValue(val) {
   return val;
 }
 
+/** 1-based column index → Excel letter (1 → A, 27 → AA). */
+function columnIndexToLetter(col) {
+  let n = col;
+  let s = "";
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    s = String.fromCharCode(65 + rem) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s || "A";
+}
+
 function dedupeHeaders(headers) {
   const seen = new Set();
   return headers.map((h, i) => {
@@ -140,6 +152,35 @@ function readRectAsObjects(ws, bounds, maxDataRows) {
     if (any) rows.push(obj);
   }
   return { columns: unique, rows };
+}
+
+/**
+ * Literal sheet grid for UI preview (row 1 in Excel = row 1 in preview).
+ * @param {import('exceljs').Worksheet} ws
+ * @param {{ top: number, left: number, bottom: number, right: number }} bounds
+ * @param {number} maxRows max Excel rows to include starting at bounds.top
+ */
+function readRectAsGrid(ws, bounds, maxRows) {
+  const columnLetters = [];
+  for (let c = bounds.left; c <= bounds.right; c++) {
+    columnLetters.push(columnIndexToLetter(c));
+  }
+  const maxRow = Math.min(bounds.bottom, bounds.top + Math.max(0, maxRows - 1));
+  /** @type {{ rowNumber: number, cells: string[] }[]} */
+  const rows = [];
+  for (let r = bounds.top; r <= maxRow; r++) {
+    const cells = [];
+    for (let c = bounds.left; c <= bounds.right; c++) {
+      cells.push(cellText(ws.getRow(r).getCell(c).value));
+    }
+    rows.push({ rowNumber: r, cells });
+  }
+  return {
+    columnLetters,
+    rows,
+    startRow: bounds.top,
+    startCol: bounds.left
+  };
 }
 
 function sheetAutoBounds(ws) {
@@ -331,11 +372,12 @@ async function readExcelWorkbookPreview(sourceType, sourcePath, maxRowsPerSheet)
       continue;
     }
     const { columns, rows } = readRectAsObjects(ws, bounds, cap);
-    sheets[name] = { columns, rows, rowCount: rows.length };
+    const gridPreview = readRectAsGrid(ws, bounds, cap);
+    sheets[name] = { columns, rows, rowCount: rows.length, gridPreview };
   }
 
   const defaultSheet = sheetNames[0];
-  const def = sheets[defaultSheet] || { columns: [], rows: [], rowCount: 0 };
+  const def = sheets[defaultSheet] || { columns: [], rows: [], rowCount: 0, gridPreview: null };
   const columnTypes = inferColumnTypes(def.columns, def.rows);
 
   return {
@@ -345,7 +387,8 @@ async function readExcelWorkbookPreview(sourceType, sourcePath, maxRowsPerSheet)
       columns: def.columns,
       rows: def.rows,
       columnTypes,
-      rowCount: def.rowCount
+      rowCount: def.rowCount,
+      gridPreview: def.gridPreview || null
     },
     sheets,
     columns: def.columns,

@@ -20,11 +20,13 @@ const RT = q("rent");
 const B = q("balance");
 const LS = q("legalStatus");
 const NF = q("nextFollowUp");
+const TF = q("tenantFollowUp");
 const LPD = q("lastPaymentDate");
 const LPA = q("lastPaymentAmount");
 const PH = q("phone");
 const EM = q("email");
 const TC = q("tenantCode");
+const HP = q("hmyperson");
 /** Row balance/rent as DECIMAL with 0 fallback — avoids NULL in comparisons (SUM was silently dropping rows). */
 const DT_BAL = `ISNULL(TRY_CAST(dt.${B} AS DECIMAL(18,4)), 0)`;
 const DT_RENT = `ISNULL(TRY_CAST(dt.${RT} AS DECIMAL(18,4)), 0)`;
@@ -556,11 +558,13 @@ async function getUnits(req, res) {
       ${MD_EXPR} AS monthsDelinquent,
       dt.${LS} AS legalStatus,
       dt.${NF} AS nextFollowUp,
+      dt.${TF} AS tenantFollowUp,
       dt.${LPD} AS lastPaymentDate,
       dt.${LPA} AS lastPaymentAmount,
       dt.${PH} AS phone,
       dt.${EM} AS email,
       NULLIF(LTRIM(RTRIM(CAST(dt.[TenantCode] AS NVARCHAR(400)))), N'') AS tenantCode,
+      NULLIF(LTRIM(RTRIM(CAST(dt.${HP} AS NVARCHAR(400)))), N'') AS hmyperson,
       (SELECT TOP 1 CAST(csErp.ErpStaticLink AS NVARCHAR(2000))
        FROM dbo.CompanyCollectionSettings csErp
        WHERE csErp.CompanyId = @companyId) AS companyErpStaticLink
@@ -639,6 +643,25 @@ async function getUnits(req, res) {
       copy.tenantCode = v == null || v === "" ? null : String(v).trim();
       for (const key of Object.keys(copy)) {
         if (key.toLowerCase() === "tenantcode" && key !== "tenantCode") delete copy[key];
+      }
+    }
+    const hpKey = Object.keys(copy).find((x) => x.toLowerCase().replace(/[\s_]/g, "") === "hmyperson");
+    if (hpKey !== undefined) {
+      const v = copy[hpKey];
+      copy.hmyperson = v == null || v === "" ? null : String(v).trim();
+      for (const key of Object.keys(copy)) {
+        if (key.toLowerCase().replace(/[\s_]/g, "") === "hmyperson" && key !== "hmyperson") delete copy[key];
+      }
+    }
+    const tfKey = Object.keys(copy).find((x) => x.toLowerCase().replace(/[\s_]/g, "") === "tenantfollowup");
+    if (tfKey !== undefined) {
+      const v = copy[tfKey];
+      if (v instanceof Date) copy.tenantFollowUp = v.toISOString();
+      else copy.tenantFollowUp = v == null || v === "" ? null : v;
+      for (const key of Object.keys(copy)) {
+        if (key.toLowerCase().replace(/[\s_]/g, "") === "tenantfollowup" && key !== "tenantFollowUp") {
+          delete copy[key];
+        }
       }
     }
     return copy;
@@ -889,9 +912,10 @@ async function patchUnitRow(req, res) {
   }
 
   const hasNf = Object.prototype.hasOwnProperty.call(b, "nextFollowUp");
+  const hasTf = Object.prototype.hasOwnProperty.call(b, "tenantFollowUp");
   const hasLs = Object.prototype.hasOwnProperty.call(b, "legalStatus");
-  if (!hasNf && !hasLs) {
-    return res.status(400).json({ error: "Provide nextFollowUp and/or legalStatus" });
+  if (!hasNf && !hasTf && !hasLs) {
+    return res.status(400).json({ error: "Provide nextFollowUp, tenantFollowUp, and/or legalStatus" });
   }
 
   const inputs = baseRowInputs(companyId, property, unit, name, b.tenantCode);
@@ -920,6 +944,19 @@ async function patchUnitRow(req, res) {
       }
       sets.push(`dt.${NF} = @nextFollowUp`);
       inputs.nextFollowUp = { type: sql.DateTime2, value: d };
+    }
+  }
+  if (hasTf) {
+    const v = b.tenantFollowUp;
+    if (v === null || v === "") {
+      sets.push(`dt.${TF} = NULL`);
+    } else {
+      const d = new Date(String(v));
+      if (Number.isNaN(d.getTime())) {
+        return res.status(400).json({ error: "tenantFollowUp must be a valid date or empty" });
+      }
+      sets.push(`dt.${TF} = @tenantFollowUp`);
+      inputs.tenantFollowUp = { type: sql.DateTime2, value: d };
     }
   }
   if (hasLs) {

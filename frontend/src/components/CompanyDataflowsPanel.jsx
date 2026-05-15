@@ -15,7 +15,9 @@ import {
 } from "lucide-react";
 import { api } from "../api/apiClient";
 import DataflowTransformWizardStep from "./DataflowTransformWizardStep.jsx";
+import DataflowTransformToolbar from "./DataflowTransformToolbar.jsx";
 import { validatePipelineText, summarizeValidation } from "@collectease/transformation-ops";
+import { parsePipelineText, appendStep, stringifyPipeline } from "../lib/dataflowPipelineUtils.js";
 import {
   acquireGraphFilesAccessToken,
   getExcelDownloadUrl,
@@ -28,20 +30,21 @@ import {
 } from "../microsoft/msGraphFiles.js";
 
 const STEPS = [
-  { id: 1, title: "Basic info", short: "Info" },
+  { id: 1, title: "Dataflow info", short: "Info" },
   { id: 2, title: "Excel preview", short: "Excel" },
-  { id: 3, title: "Transformation", short: "Transform" },
+  { id: 3, title: "Transform builder", short: "Transform" },
   { id: 4, title: "Output preview", short: "Output" },
   { id: 5, title: "Column mapping", short: "Map" },
-  { id: 6, title: "Schedule & sync", short: "Schedule" },
-  { id: 7, title: "Review & save", short: "Review" }
+  { id: 6, title: "Unique key", short: "Key" },
+  { id: 7, title: "Schedule & run", short: "Schedule" },
+  { id: 8, title: "Review & save", short: "Review" }
 ];
+
+const WIZARD_LAST_STEP = STEPS.length;
 
 const DEFAULT_PIPELINE_SAFE = `{
   "version": 1,
-  "steps": [
-    { "op": "trimAll" }
-  ]
+  "steps": []
 }`;
 
 /** Match backend preview cap (see excelSourceReader readExcelWorkbookPreview). */
@@ -54,7 +57,55 @@ function formatExcelPreviewCell(value) {
 }
 
 /** Excel-like grid (not an HTML table): gutter + bordered cells. */
-function DataflowsExcelSheetPreview({ columns, columnTypes, rows, compact, declaredRowCount }) {
+function DataflowsExcelSheetPreview({ columns, columnTypes, rows, gridPreview, compact, declaredRowCount }) {
+  const grid = gridPreview && Array.isArray(gridPreview.rows) && gridPreview.rows.length ? gridPreview : null;
+  if (grid) {
+    const letters = Array.isArray(grid.columnLetters) ? grid.columnLetters : [];
+    const gridRows = grid.rows;
+    const colTpl = letters.length ? `2.75rem repeat(${letters.length}, minmax(7rem, max-content))` : "1fr";
+    const meta = compact
+      ? `${gridRows.length} row${gridRows.length === 1 ? "" : "s"} (Excel rows ${grid.startRow || 1}–${
+          gridRows[gridRows.length - 1]?.rowNumber ?? "?"
+        }) — same layout as the file`
+      : `${gridRows.length} rows — exact sheet layout (column letters A, B, C…).`;
+
+    return (
+      <div
+        className={`dataflows-excel-preview${compact ? " dataflows-excel-preview--compact" : ""} dataflows-excel-preview--raw`}
+        role="region"
+        aria-label="Excel sheet preview"
+      >
+        <p className="dataflows-excel-meta text-muted">{meta}</p>
+        <div className="dataflows-excel-scroll">
+          <div className="dataflows-excel-sheet">
+            <div className="dataflows-excel-row dataflows-excel-row--header" style={{ gridTemplateColumns: colTpl }}>
+              <div className="dataflows-excel-gutter" aria-hidden />
+              {letters.map((letter) => (
+                <div key={letter} className="dataflows-excel-cell dataflows-excel-cell--header">
+                  <span className="dataflows-excel-hname">{letter}</span>
+                </div>
+              ))}
+            </div>
+            {gridRows.map((row) => (
+              <div
+                key={row.rowNumber}
+                className="dataflows-excel-row dataflows-excel-row--data"
+                style={{ gridTemplateColumns: colTpl }}
+              >
+                <div className="dataflows-excel-gutter">{row.rowNumber}</div>
+                {(row.cells || []).map((cell, ci) => (
+                  <div key={`${row.rowNumber}-${ci}`} className="dataflows-excel-cell">
+                    {cell}
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const cols = Array.isArray(columns) ? columns : [];
   const data = Array.isArray(rows) ? rows : [];
   const colTpl = cols.length ? `2.75rem repeat(${cols.length}, minmax(7rem, max-content))` : "1fr";
@@ -143,11 +194,17 @@ function validateStep(step, ctx) {
       return "";
     case 5:
       if (!String(form.destinationTable || "").trim()) return "Enter or select a destination SQL table.";
-      if (!String(form.uniqueKeyColumn || "").trim()) return "Choose the unique key (upsert) column.";
-      if (!form.mappings.some((m) => m.isMapped !== false && String(m.destinationColumn).trim() === String(form.uniqueKeyColumn).trim()))
-        return "The unique key column must be mapped from a source column.";
       return "";
     case 6:
+      if (!String(form.uniqueKeyColumn || "").trim()) return "Choose the unique key (upsert) column.";
+      if (
+        !form.mappings.some(
+          (m) => m.isMapped !== false && String(m.destinationColumn).trim() === String(form.uniqueKeyColumn).trim()
+        )
+      )
+        return "The unique key column must be mapped from a source column.";
+      return "";
+    case 7:
       if (form.scheduleType === "interval_minutes") {
         const n = Number(String(form.scheduleValue || "").trim());
         if (!Number.isFinite(n) || n < 1) return "Enter interval in minutes (1 or more).";
@@ -159,7 +216,7 @@ function validateStep(step, ctx) {
         if (!ctx.weeklyTime || !ctx.weeklyWeekday) return "Pick weekday and time for weekly schedule.";
       }
       return "";
-    case 7:
+    case 8:
       return "";
     default:
       return "";
@@ -581,6 +638,32 @@ export default function CompanyDataflowsPanel({ workspaceCompanyId, companies = 
     [cid, form.transformationScript, form.sourceType, form.sourcePath, workbook?.sheetNames]
   );
 
+  const pipelineStepCount = useMemo(() => {
+    const p = parsePipelineText(form.transformationScript);
+    return p?.steps?.length ?? 0;
+  }, [form.transformationScript]);
+
+  const addPipelineStep = useCallback(
+    (step) => {
+      setForm((f) => {
+        const base = parsePipelineText(f.transformationScript) || { version: 1, steps: [] };
+        return { ...f, transformationScript: stringifyPipeline(appendStep(base, step)) };
+      });
+      setTransformOk(false);
+      window.setTimeout(() => void runTransformPreview("manual"), 0);
+    },
+    [runTransformPreview]
+  );
+
+  const setPipelineFromString = useCallback(
+    (text) => {
+      setTransformationScript(text);
+      setTransformOk(false);
+      window.setTimeout(() => void runTransformPreview("manual"), 0);
+    },
+    [setTransformationScript, runTransformPreview]
+  );
+
   /** Re-run transform preview while editing JSON (step 3). */
   useEffect(() => {
     if (view !== "wizard" || wizardStep !== 3 || cid == null) return;
@@ -751,7 +834,7 @@ export default function CompanyDataflowsPanel({ workspaceCompanyId, companies = 
       return;
     }
     setMsg("");
-    setWizardStep((s) => Math.min(7, s + 1));
+    setWizardStep((s) => Math.min(WIZARD_LAST_STEP, s + 1));
   }
 
   function goBack() {
@@ -934,14 +1017,43 @@ export default function CompanyDataflowsPanel({ workspaceCompanyId, companies = 
               {workbook ? (
                 <>
                   <p className="text-muted" style={{ fontSize: "0.88rem", margin: 0 }}>
-                    Default preview sheet: <strong>{workbook.defaultSheet}</strong>. Other sheets:{" "}
-                    {(workbook.sheetNames || []).join(", ") || "—"} (reference only — no selection required).
+                    Default sheet: <strong>{workbook.defaultSheet}</strong> · Other: {(workbook.sheetNames || []).join(", ") || "—"}.
+                    Preview below matches the Excel file row-for-row (A, B, C…). For reports with title rows (e.g. Collection Report), use{" "}
+                    <strong>Transform</strong> → template <em>Collection report</em> or add{" "}
+                    <em>Remove top 5 rows</em> then <em>First row as column names</em>.
                   </p>
-                  <DataflowsExcelSheetPreview
-                    columns={workbook.defaultPreview?.columns}
-                    columnTypes={workbook.defaultPreview?.columnTypes}
-                    rows={workbook.defaultPreview?.rows}
+                  <DataflowTransformToolbar
+                    columns={workbook.defaultPreview?.columns || []}
+                    onAddStep={addPipelineStep}
+                    disabled={busy || transformPreviewBusy}
                   />
+                  {transformOutput?.columns?.length && pipelineStepCount > 0 ? (
+                    <>
+                      <p className="text-muted" style={{ fontSize: "0.82rem", margin: "0.5rem 0 0" }}>
+                        <strong>Transformed preview</strong> (first 50 rows)
+                      </p>
+                      <DataflowsExcelSheetPreview
+                        compact
+                        declaredRowCount={transformOutput.rowCount}
+                        columns={transformOutput.columns}
+                        columnTypes={null}
+                        rows={(transformOutput.rows || []).slice(0, 50)}
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-muted" style={{ fontSize: "0.82rem", margin: "0.5rem 0 0" }}>
+                        <strong>Sheet preview</strong> (exact Excel layout — first 80 rows)
+                      </p>
+                      <DataflowsExcelSheetPreview
+                        compact
+                        gridPreview={{
+                          ...(workbook.defaultPreview?.gridPreview || {}),
+                          rows: (workbook.defaultPreview?.gridPreview?.rows || []).slice(0, 80)
+                        }}
+                      />
+                    </>
+                  )}
                 </>
               ) : null}
             </div>
@@ -951,6 +1063,8 @@ export default function CompanyDataflowsPanel({ workspaceCompanyId, companies = 
             <DataflowTransformWizardStep
               transformationScript={form.transformationScript}
               onTransformationScriptChange={setTransformationScript}
+              onPipelineChange={setPipelineFromString}
+              onAddStep={addPipelineStep}
               workbook={workbook && !workbookErr ? workbook : null}
               transformErr={transformErr}
               transformOk={transformOk}
@@ -977,7 +1091,7 @@ export default function CompanyDataflowsPanel({ workspaceCompanyId, companies = 
                   declaredRowCount={transformOutput.rowCount}
                   columns={transformOutput.columns}
                   columnTypes={null}
-                  rows={transformOutput.rows}
+                  rows={(transformOutput.rows || []).slice(0, 100)}
                 />
               ) : (
                 <p className="text-danger">No preview — go back to Transform and fix the pipeline.</p>
@@ -997,19 +1111,6 @@ export default function CompanyDataflowsPanel({ workspaceCompanyId, companies = 
                 <datalist id="df-sqltables">
                   {sqlTables.map((t) => (
                     <option key={t} value={t} />
-                  ))}
-                </datalist>
-              </label>
-              <label className="dataflows-field">
-                <span>Unique key column (SQL)</span>
-                <input
-                  list="df-uk"
-                  value={form.uniqueKeyColumn}
-                  onChange={(e) => setForm((f) => ({ ...f, uniqueKeyColumn: e.target.value }))}
-                />
-                <datalist id="df-uk">
-                  {destSchema.map((c) => (
-                    <option key={c.column} value={c.column} />
                   ))}
                 </datalist>
               </label>
@@ -1127,6 +1228,55 @@ export default function CompanyDataflowsPanel({ workspaceCompanyId, companies = 
 
           {wizardStep === 6 ? (
             <div className="dataflows-wizard-grid">
+              <p className="text-muted" style={{ margin: 0 }}>
+                Choose the SQL column used to match rows for upsert (must be mapped on the previous step).
+              </p>
+              <label className="dataflows-field">
+                <span>Unique key column (SQL)</span>
+                <input
+                  list="df-uk"
+                  value={form.uniqueKeyColumn}
+                  onChange={(e) => setForm((f) => ({ ...f, uniqueKeyColumn: e.target.value }))}
+                />
+                <datalist id="df-uk">
+                  {destSchema.map((c) => (
+                    <option key={c.column} value={c.column} />
+                  ))}
+                </datalist>
+              </label>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                disabled={!form.uniqueKeyColumn || !transformOutput?.rows?.length}
+                onClick={() => {
+                  const uk = String(form.uniqueKeyColumn).trim();
+                  const mapped = form.mappings.find(
+                    (m) => m.isMapped !== false && String(m.destinationColumn).trim() === uk
+                  );
+                  const srcCol = mapped?.sourceColumn;
+                  if (!srcCol) {
+                    setMsg("Map the unique key column from a source column first.");
+                    return;
+                  }
+                  const seen = new Map();
+                  const dups = [];
+                  for (const row of transformOutput.rows || []) {
+                    const k = String(row[srcCol] ?? "").trim();
+                    if (!k) continue;
+                    if (seen.has(k)) dups.push(k);
+                    else seen.set(k, true);
+                  }
+                  if (dups.length) setMsg(`Warning: ${dups.length} duplicate key value(s) in preview, e.g. "${dups[0]}".`);
+                  else setMsg("No duplicate keys found in preview sample.");
+                }}
+              >
+                Check duplicates in preview
+              </button>
+            </div>
+          ) : null}
+
+          {wizardStep === 7 ? (
+            <div className="dataflows-wizard-grid">
               <label className="dataflows-field">
                 <span>Upsert mode</span>
                 <select value={form.upsertMode} onChange={(e) => setForm((f) => ({ ...f, upsertMode: e.target.value }))}>
@@ -1197,7 +1347,7 @@ export default function CompanyDataflowsPanel({ workspaceCompanyId, companies = 
             </div>
           ) : null}
 
-          {wizardStep === 7 ? (
+          {wizardStep === 8 ? (
             <div className="dataflows-wizard-grid">
               <dl className="dataflows-summary">
                 <dt>Name</dt>
@@ -1219,6 +1369,8 @@ export default function CompanyDataflowsPanel({ workspaceCompanyId, companies = 
                 </dd>
                 <dt>Upsert</dt>
                 <dd>{form.upsertMode}</dd>
+                <dt>Transform steps</dt>
+                <dd>{pipelineStepCount}</dd>
                 <dt>Mappings</dt>
                 <dd>{form.mappings.filter((m) => m.isMapped !== false).length} active</dd>
               </dl>
@@ -1281,7 +1433,7 @@ export default function CompanyDataflowsPanel({ workspaceCompanyId, companies = 
             <button type="button" className="btn btn-ghost" onClick={goBack} disabled={wizardStep <= 1 || busy}>
               <ChevronLeft size={18} /> Back
             </button>
-            {wizardStep < 7 ? (
+            {wizardStep < WIZARD_LAST_STEP ? (
               <button
                 type="button"
                 className="btn btn-primary"

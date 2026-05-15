@@ -19,6 +19,9 @@ import {
   buildRemoveBlankRowsPipeline,
   buildRemoveHeaderRowPipeline
 } from "@collectease/transformation-ops";
+import DataflowTransformToolbar from "./DataflowTransformToolbar.jsx";
+import DataflowStepList from "./DataflowStepList.jsx";
+import { parsePipelineText, appendStep, stringifyPipeline } from "../lib/dataflowPipelineUtils.js";
 
 const TEMPLATE_OPTIONS = [
   { id: "basic", label: "Basic cleanup (trim all)" },
@@ -57,6 +60,8 @@ export default function DataflowTransformWizardStep({
   serverValidationErrors = [],
   onRunPreview,
   onValidateOnly,
+  onAddStep,
+  onPipelineChange,
   busy,
   defaultPipelineText
 }) {
@@ -101,6 +106,31 @@ export default function DataflowTransformWizardStep({
     resetAddForm(op);
     setStepBuilderErr("");
   };
+
+  const handleQuickAddStep = useCallback(
+    (step) => {
+      if (onAddStep) {
+        onAddStep(step);
+        return;
+      }
+      onTransformationScriptChange((prev) => {
+        const base = parsePipelineText(prev) || { version: 1, steps: [] };
+        return stringifyPipeline(appendStep(base, step));
+      });
+    },
+    [onAddStep, onTransformationScriptChange]
+  );
+
+  const handlePipelineChange = useCallback(
+    (text) => {
+      if (onPipelineChange) {
+        onPipelineChange(text);
+        return;
+      }
+      onTransformationScriptChange(text);
+    },
+    [onPipelineChange, onTransformationScriptChange]
+  );
 
   useEffect(() => {
     if (addOp === "useSheet" || addOp === "appendSheet") {
@@ -303,6 +333,21 @@ export default function DataflowTransformWizardStep({
           </div>
         </div>
       ) : null}
+
+      <DataflowTransformToolbar
+        columns={previewCols}
+        onAddStep={handleQuickAddStep}
+        disabled={busy || transformPreviewBusy}
+      />
+
+      <div className="dataflows-transform-steps-panel">
+        <h4 className="dataflows-transform-steps-panel__title">Pipeline steps</h4>
+        <DataflowStepList
+          transformationScript={transformationScript}
+          onPipelineChange={handlePipelineChange}
+          disabled={busy || transformPreviewBusy}
+        />
+      </div>
 
       <div className="dataflows-transform-toolbar">
         <div className="dataflows-transform-toolbar__templates">

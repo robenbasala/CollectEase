@@ -42,9 +42,9 @@ const SLICE_CHIP_LABELS = {
   occupied: "Slice: Occupied",
   lt1: "Slice: < 1 mo vs rent",
   ge1: "Slice: ≥ 1 mo vs rent",
-  missingFollowUp: "Slice: Missing follow up",
-  pastDueFollowUp: "Slice: Past due follow up",
-  dueTodayFollowUp: "Slice: Due today follow up",
+  missingFollowUp: "Slice: Missing legal follow up",
+  pastDueFollowUp: "Slice: Past due legal follow up",
+  dueTodayFollowUp: "Slice: Due today legal follow up",
   requiresLegal: "Slice: Requires legal",
   removeLegal: "Slice: Remove legal",
   zeroBalance: "Slice: Zero balance",
@@ -463,9 +463,9 @@ export default function PropertyDetails() {
                   <option value="ge1">≥ 1 mo vs rent</option>
                 </optgroup>
                 <optgroup label="Alerts">
-                  <option value="missingFollowUp">Missing FU</option>
-                  <option value="pastDueFollowUp">Past due FU</option>
-                  <option value="dueTodayFollowUp">Due today FU</option>
+                  <option value="missingFollowUp">Missing legal FU</option>
+                  <option value="pastDueFollowUp">Past due legal FU</option>
+                  <option value="dueTodayFollowUp">Due today legal FU</option>
                   <option value="requiresLegal">Requires legal</option>
                   <option value="removeLegal">Remove legal</option>
                 </optgroup>

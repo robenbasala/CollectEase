@@ -8,6 +8,7 @@ import {
   UNIT_DETAIL_COLUMN_LABELS
 } from "../constants/unitDetailColumns";
 import LegalStatusCell from "./LegalStatusCell";
+import { buildErpDeepLink, erpLinkIdFromUnit, hmypersonFromUnit, tenantCodeFromUnit } from "../lib/erpDeepLink";
 import { formatPhoneDisplay, formatProperName } from "../lib/tenantDisplayFormat";
 
 function formatMoney(n) {
@@ -27,26 +28,6 @@ function phoneValue(u) {
   return u.phone ?? u.PhomeNumber ?? u.phomeNumber ?? "";
 }
 
-function buildTenantDeepLink(staticPart, tenantCode) {
-  if (!staticPart || typeof staticPart !== "string") return null;
-  const base = staticPart.trim();
-  if (!base) return null;
-  if (tenantCode === undefined || tenantCode === null) return null;
-  const code = String(tenantCode).trim();
-  if (!code) return null;
-  return `${base}${code}`;
-}
-
-function tenantCodeValue(u) {
-  if (!u || typeof u !== "object") return "";
-  for (const k of Object.keys(u)) {
-    if (k.toLowerCase() === "tenantcode") {
-      const v = u[k];
-      return v == null ? "" : String(v).trim();
-    }
-  }
-  return "";
-}
 
 function getSortValue(u, key) {
   switch (key) {
@@ -57,7 +38,9 @@ function getSortValue(u, key) {
     case "name":
       return u.name ?? "";
     case "tenantCode":
-      return tenantCodeValue(u);
+      return tenantCodeFromUnit(u);
+    case "hmyperson":
+      return hmypersonFromUnit(u);
     case "balance": {
       const n = Number(u.balance);
       return Number.isNaN(n) ? null : n;
@@ -80,6 +63,10 @@ function getSortValue(u, key) {
       if (!u.nextFollowUp) return null;
       const t = new Date(u.nextFollowUp).getTime();
       return Number.isNaN(t) ? null : t;
+    case "tenantFollowUp":
+      if (!u.tenantFollowUp) return null;
+      const tf = new Date(u.tenantFollowUp).getTime();
+      return Number.isNaN(tf) ? null : tf;
     case "lastPaymentDate":
       if (!u.lastPaymentDate) return null;
       const t2 = new Date(u.lastPaymentDate).getTime();
@@ -124,7 +111,7 @@ function sameDetailRow(a, b) {
     String(a.property ?? "").trim() === String(b.property ?? "").trim() &&
     String(a.unit ?? "").trim() === String(b.unit ?? "").trim() &&
     String(a.name ?? "").trim() === String(b.name ?? "").trim() &&
-    tenantCodeValue(a) === tenantCodeValue(b)
+    tenantCodeFromUnit(a) === tenantCodeFromUnit(b)
   );
 }
 
@@ -168,7 +155,14 @@ function renderBodyCells(u, visibleOrder, baseLink, openPaymentReminder, reminde
       case "tenantCode":
         parts.push(
           <td key="tc" className="unit-detail-tenant-code">
-            {tenantCodeValue(u) || "—"}
+            {tenantCodeFromUnit(u) || "—"}
+          </td>
+        );
+        break;
+      case "hmyperson":
+        parts.push(
+          <td key="hp" className="unit-detail-hmyperson">
+            {hmypersonFromUnit(u) || "—"}
           </td>
         );
         break;
@@ -206,7 +200,18 @@ function renderBodyCells(u, visibleOrder, baseLink, openPaymentReminder, reminde
         break;
       }
       case "nextFollowUp":
-        parts.push(<td key="nf">{formatDate(u.nextFollowUp)}</td>);
+        parts.push(
+          <td key="nf" className="unit-detail-followup unit-detail-followup--system" title="Next legal follow up (import / legal cases, read-only)">
+            {formatDate(u.nextFollowUp)}
+          </td>
+        );
+        break;
+      case "tenantFollowUp":
+        parts.push(
+          <td key="tf" className="unit-detail-followup unit-detail-followup--tenant">
+            {formatDate(u.tenantFollowUp)}
+          </td>
+        );
         break;
       case "lastPayment":
         parts.push(
@@ -254,7 +259,7 @@ function renderBodyCells(u, visibleOrder, baseLink, openPaymentReminder, reminde
         );
         break;
       case "actions": {
-        const erpHref = buildTenantDeepLink(baseLink, tenantCodeValue(u));
+        const erpHref = buildErpDeepLink(baseLink, erpLinkIdFromUnit(u));
         parts.push(
           <td key="ac">
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
@@ -289,8 +294,8 @@ function renderBodyCells(u, visibleOrder, baseLink, openPaymentReminder, reminde
                   title={
                     !baseLink.trim()
                       ? "Set ERP static link in Settings"
-                      : !String(tenantCodeValue(u)).trim()
-                        ? "No tenant code on this row"
+                      : !String(erpLinkIdFromUnit(u)).trim()
+                        ? "No Hmyperson / tenant code on this row"
                         : "Link unavailable"
                   }
                 >
@@ -509,12 +514,12 @@ export default function UnitDetailsTable({
           </thead>
           <tbody>
             {sortedUnits.map((u, idx) => {
-              const erpHref = buildTenantDeepLink(baseLink, tenantCodeValue(u));
+              const erpHref = buildErpDeepLink(baseLink, erpLinkIdFromUnit(u));
               const rowTooltip = erpHref
                 ? erpHref
                 : !baseLink.trim()
                   ? "Set ERP static link in Settings"
-                  : !String(tenantCodeValue(u)).trim()
+                  : !String(erpLinkIdFromUnit(u)).trim()
                     ? "No tenant code on this row"
                     : undefined;
               return (
