@@ -15,7 +15,7 @@ export default defineConfig(({ mode }) => {
     plugins: [react()],
     resolve: {
       alias: {
-        "@collectease/transformation-ops": path.resolve(__dirname, "../shared/transformationOpsRegistry.cjs")
+        "@collectease/transformation-ops": path.resolve(__dirname, "src/lib/transformationOpsRegistryClient.js")
       }
     },
     server: {
