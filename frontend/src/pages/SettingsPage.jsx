@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ImageIcon } from "lucide-react";
 import { api } from "../api/apiClient";
 import { getActiveCompanyId, getCompanyDisplayName } from "../config/company.js";
+import { APP_LOGO_URL } from "../lib/appLogo.js";
 import PageHeader from "../components/PageHeader";
 import Spinner from "../components/Spinner";
 
@@ -287,11 +287,7 @@ export default function SettingsPage() {
                   <div className="field">
                     <label>Logo</label>
                     <div className="settings-logo-preview">
-                      {logoDataUrl ? (
-                        <img src={logoDataUrl} alt="" />
-                      ) : (
-                        <ImageIcon size={40} strokeWidth={1.25} aria-hidden />
-                      )}
+                      <img src={logoDataUrl || APP_LOGO_URL} alt="" />
                     </div>
                     <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
                       <label className="btn btn-primary" style={{ cursor: "pointer", margin: 0 }}>

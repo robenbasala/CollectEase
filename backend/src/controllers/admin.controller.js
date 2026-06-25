@@ -493,7 +493,8 @@ function rowCompanySettings(r, companyId) {
       erpStaticLink: null,
       defaultLegalStatusList: null,
       logoDataUrl: null,
-      companyDisplayName: null
+      companyDisplayName: null,
+      companyName: null
     };
   }
   const erpRaw = r.erpStaticLink ?? r.ErpStaticLink ?? r.erpstaticlink;
@@ -547,6 +548,10 @@ function rowCompanySettings(r, companyId) {
     companyDisplayName: (() => {
       const v = r.companyDisplayName ?? r.CompanyDisplayName ?? r.companydisplayname;
       return v != null ? String(v) : null;
+    })(),
+    companyName: (() => {
+      const v = r.companyName ?? r.CompanyName ?? r.companyname ?? r.Name ?? r.name;
+      return v != null ? String(v) : null;
     })()
   };
 }
@@ -557,13 +562,16 @@ async function getCompanySettings(req, res) {
   const companyId = ctx.companyId;
 
   const result = await query(
-    `SELECT CompanyId, FollowupAmount, FollowupDays, FollowupMonths,
+    `SELECT s.CompanyId, FollowupAmount, FollowupDays, FollowupMonths,
             LegalAlertAmount, LegalAlertDays, LegalAlertMonths,
             ErpStaticLink AS erpStaticLink,
             DefaultLegalStatusList AS defaultLegalStatusList,
             LogoDataUrl AS logoDataUrl,
-            CompanyDisplayName AS companyDisplayName
-     FROM dbo.CompanyCollectionSettings WHERE CompanyId = @companyId`,
+            CompanyDisplayName AS companyDisplayName,
+            c.Name AS companyName
+     FROM dbo.Companies c
+     LEFT JOIN dbo.CompanyCollectionSettings s ON s.CompanyId = c.Id
+     WHERE c.Id = @companyId`,
     { companyId: { type: sql.Int, value: companyId } }
   );
   const row = result.recordset[0];

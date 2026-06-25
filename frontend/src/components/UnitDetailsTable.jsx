@@ -9,7 +9,8 @@ import {
 } from "../constants/unitDetailColumns";
 import LegalStatusCell from "./LegalStatusCell";
 import { buildErpDeepLink, erpLinkIdFromUnit, hmypersonFromUnit, tenantCodeFromUnit } from "../lib/erpDeepLink";
-import { formatPhoneDisplay, formatProperName } from "../lib/tenantDisplayFormat";
+import { dateDueTextClass } from "../lib/followUpDateStyle.js";
+import { formatPhoneLines, formatProperName, phoneFromUnit } from "../lib/tenantDisplayFormat";
 
 function formatMoney(n) {
   const v = Number(n);
@@ -23,11 +24,6 @@ function formatDate(d) {
   if (Number.isNaN(dt.getTime())) return String(d);
   return dt.toLocaleDateString();
 }
-
-function phoneValue(u) {
-  return u.phone ?? u.PhomeNumber ?? u.phomeNumber ?? "";
-}
-
 
 function getSortValue(u, key) {
   switch (key) {
@@ -76,7 +72,7 @@ function getSortValue(u, key) {
       return Number.isNaN(n) ? null : n;
     }
     case "phone":
-      return phoneValue(u);
+      return phoneFromUnit(u);
     case "email":
       return u.email ?? "";
     default:
@@ -103,6 +99,43 @@ function compareSortValues(va, vb) {
 
 function tieBreakKey(u) {
   return `${u.property ?? ""}\t${u.unit ?? ""}\t${u.name ?? ""}`;
+}
+
+/** Relative widths for table-layout: fixed (default column = 1). */
+const UNIT_DETAIL_COL_WEIGHT = {
+  unit: 0.7,
+  name: 2,
+  balance: 0.7,
+  rent: 0.7,
+  note: 2,
+  actions: 0.7
+};
+
+function colKeysFromVisibleOrder(visibleOrder) {
+  const keys = [];
+  for (const key of visibleOrder) {
+    if (key === "lastPayment") {
+      keys.push("lastPaymentDate", "lastPaymentAmount");
+    } else {
+      keys.push(key);
+    }
+  }
+  return keys;
+}
+
+function unitDetailColWeight(colKey) {
+  return UNIT_DETAIL_COL_WEIGHT[colKey] ?? 1;
+}
+
+/** One <col> per body cell (lastPayment → date + amount). Keeps thead/tbody aligned with sticky headers. */
+function buildTableColgroup(visibleOrder) {
+  const keys = colKeysFromVisibleOrder(visibleOrder);
+  const totalWeight = keys.reduce((sum, k) => sum + unitDetailColWeight(k), 0);
+  const cols = keys.map((k) => {
+    const pct = totalWeight > 0 ? (unitDetailColWeight(k) / totalWeight) * 100 : 100 / keys.length;
+    return <col key={k} className={`col-${k}`} style={{ width: `${pct}%` }} />;
+  });
+  return <colgroup>{cols}</colgroup>;
 }
 
 function sameDetailRow(a, b) {
@@ -181,7 +214,11 @@ function renderBodyCells(u, visibleOrder, baseLink, openPaymentReminder, reminde
         );
         break;
       case "monthsDelinquent":
-        parts.push(<td key="md">{u.monthsDelinquent ?? "—"}</td>);
+        parts.push(
+          <td key="md" className="unit-detail-md-cell tabular-nums">
+            {u.monthsDelinquent ?? "—"}
+          </td>
+        );
         break;
       case "legalStatus":
         parts.push(
@@ -192,23 +229,49 @@ function renderBodyCells(u, visibleOrder, baseLink, openPaymentReminder, reminde
         break;
       case "note": {
         const noteText = String(u.note ?? "").trim();
+        const noteAtRaw = u.noteAt ?? u.noteCreatedAt ?? u.NoteAt;
+        const noteAt =
+          noteAtRaw instanceof Date
+            ? noteAtRaw
+            : noteAtRaw
+              ? new Date(noteAtRaw)
+              : null;
+        const noteAtValid = noteAt && !Number.isNaN(noteAt.getTime()) ? noteAt : null;
         parts.push(
           <td key="nt" className="unit-detail-note-cell" title={noteText || undefined}>
-            {noteText || "—"}
+            {noteText ? (
+              <span className="unit-detail-note-cell__inner">
+                {noteAtValid ? (
+                  <time className="unit-detail-note-date" dateTime={noteAtValid.toISOString()}>
+                    {formatDate(noteAtValid)}
+                  </time>
+                ) : null}
+                <span className="unit-detail-note-text">{noteText}</span>
+              </span>
+            ) : (
+              "—"
+            )}
           </td>
         );
         break;
       }
       case "nextFollowUp":
         parts.push(
-          <td key="nf" className="unit-detail-followup unit-detail-followup--system" title="Next legal follow up (import / legal cases, read-only)">
+          <td
+            key="nf"
+            className={`unit-detail-followup unit-detail-followup--system ${dateDueTextClass(u.nextFollowUp)}`}
+            title="Next legal follow up (import / legal cases, read-only)"
+          >
             {formatDate(u.nextFollowUp)}
           </td>
         );
         break;
       case "tenantFollowUp":
         parts.push(
-          <td key="tf" className="unit-detail-followup unit-detail-followup--tenant">
+          <td
+            key="tf"
+            className={`unit-detail-followup unit-detail-followup--tenant ${dateDueTextClass(u.tenantFollowUp)}`}
+          >
             {formatDate(u.tenantFollowUp)}
           </td>
         );
@@ -222,13 +285,27 @@ function renderBodyCells(u, visibleOrder, baseLink, openPaymentReminder, reminde
         );
         break;
       case "phone": {
-        const ph = phoneValue(u);
-        parts.push(<td key="ph">{formatPhoneDisplay(ph) || ph || "—"}</td>);
+        const phoneLines = formatPhoneLines(phoneFromUnit(u));
+        parts.push(
+          <td key="ph" className="unit-detail-phone-cell">
+            {phoneLines.length === 0 ? (
+              "—"
+            ) : (
+              <div className="unit-detail-phone-stack">
+                {phoneLines.map((line, i) => (
+                  <span key={i} className="unit-detail-phone-line">
+                    {line}
+                  </span>
+                ))}
+              </div>
+            )}
+          </td>
+        );
         break;
       }
       case "email":
         parts.push(
-          <td key="em">
+          <td key="em" className="unit-detail-email-cell">
             {u.email ? (
               <button
                 type="button"
@@ -314,6 +391,40 @@ function renderBodyCells(u, visibleOrder, baseLink, openPaymentReminder, reminde
   return parts;
 }
 
+function UnitDetailColumnsButton({ onClick }) {
+  return (
+    <button
+      type="button"
+      className="unit-detail-columns-btn"
+      onClick={onClick}
+      title="Choose which columns to show and their order"
+    >
+      <span className="unit-detail-columns-btn__icon" aria-hidden>
+        <Columns3 size={17} strokeWidth={2.25} />
+      </span>
+      <span className="unit-detail-columns-btn__text">Columns</span>
+    </button>
+  );
+}
+
+function PropertyBlockHead({ blockCaption, blockRowCount }) {
+  return (
+    <div className="property-detail-unit-block__head">
+      <h3 className="property-detail-unit-block__title">{blockCaption.propertyName}</h3>
+      <div className="property-detail-unit-block__meta">
+        <span className="property-detail-unit-block__count">
+          {blockRowCount} {blockRowCount === 1 ? "row" : "rows"}
+        </span>
+        <span className="property-detail-unit-block__total money">
+          Total balance: {formatMoney(blockCaption.totalBalance)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+export { UnitDetailColumnsButton };
+
 export default function UnitDetailsTable({
   units,
   erpStaticLink,
@@ -321,6 +432,7 @@ export default function UnitDetailsTable({
   columnPrefs,
   onColumnPrefsSaved,
   showColumnsControl = true,
+  onOpenColumnPrefs = null,
   blockCaption = null,
   emailPreviewContext = null,
   legalStatusChoices = [],
@@ -330,6 +442,9 @@ export default function UnitDetailsTable({
   const [prefsOpen, setPrefsOpen] = useState(false);
   const [paymentReminderUnit, setPaymentReminderUnit] = useState(null);
   const [detailModalUnit, setDetailModalUnit] = useState(null);
+  const showColumnsButton = Boolean(onOpenColumnPrefs) || showColumnsControl;
+  const handleOpenColumnPrefs = onOpenColumnPrefs ?? (() => setPrefsOpen(true));
+  const renderColumnPrefsModal = showColumnsControl && !onOpenColumnPrefs;
 
   useEffect(() => {
     setDetailModalUnit((cur) => {
@@ -397,30 +512,23 @@ export default function UnitDetailsTable({
   });
 
   const baseLink = typeof erpStaticLink === "string" ? erpStaticLink : "";
-  const hasLastPayment = visibleOrder.includes("lastPayment");
-  const headerRowSpan = hasLastPayment ? 2 : 1;
+  const tableColgroup = buildTableColgroup(visibleOrder);
 
-  const headerRow1 = [];
-  const headerRow2 = [];
+  const headerRow = [];
   for (const key of visibleOrder) {
     if (key === "lastPayment") {
-      headerRow1.push(
-        <th key="lp-h" colSpan={2} className="th-last-payment-group">
-          {UNIT_DETAIL_COLUMN_LABELS.lastPayment}
-        </th>
-      );
-      headerRow2.push(
-        <th key="lp-d" className="th-last-payment-sub th-sortable">
+      headerRow.push(
+        <th key="lp-d" className="th-last-payment-sub th-sortable th-col-lastPaymentDate">
           <SortHeaderButton
-            label="Date"
+            label={UNIT_DETAIL_COLUMN_LABELS.lastPaymentDate}
             colKey="lastPaymentDate"
             {...sh("lastPaymentDate")}
             onSort={handleSort}
           />
         </th>,
-        <th key="lp-a" className="th-last-payment-sub th-sortable">
+        <th key="lp-a" className="th-last-payment-sub th-sortable th-col-lastPaymentAmount">
           <SortHeaderButton
-            label="Amount"
+            label={UNIT_DETAIL_COLUMN_LABELS.lastPaymentAmount}
             colKey="lastPaymentAmount"
             {...sh("lastPaymentAmount")}
             onSort={handleSort}
@@ -428,19 +536,15 @@ export default function UnitDetailsTable({
         </th>
       );
     } else if (key === "actions") {
-      headerRow1.push(
-        <th key="act" rowSpan={headerRowSpan} className="th-actions">
+      headerRow.push(
+        <th key="act" className="th-actions th-col-actions">
           {UNIT_DETAIL_COLUMN_LABELS.actions}
         </th>
       );
     } else {
       const label = UNIT_DETAIL_COLUMN_LABELS[key];
-      headerRow1.push(
-        <th
-          key={key}
-          rowSpan={headerRowSpan}
-          className={`th-sortable th-col-${key}`}
-        >
+      headerRow.push(
+        <th key={key} className={`th-sortable th-col-${key}`}>
           <SortHeaderButton label={label} colKey={key} {...sh(key)} onSort={handleSort} />
         </th>
       );
@@ -459,17 +563,7 @@ export default function UnitDetailsTable({
     return (
       <Fragment>
         {blockCaption ? (
-          <div className="property-detail-unit-block__head">
-            <h3 className="property-detail-unit-block__title">{blockCaption.propertyName}</h3>
-            <div className="property-detail-unit-block__meta">
-              <span className="property-detail-unit-block__count">
-                {blockRowCount} {blockRowCount === 1 ? "row" : "rows"}
-              </span>
-              <span className="property-detail-unit-block__total money">
-                Total balance: {formatMoney(blockCaption.totalBalance)}
-              </span>
-            </div>
-          </div>
+          <PropertyBlockHead blockCaption={blockCaption} blockRowCount={blockRowCount} />
         ) : null}
         <div className="empty-state">No units match the current filters.</div>
       </Fragment>
@@ -479,38 +573,18 @@ export default function UnitDetailsTable({
   return (
     <Fragment>
       {blockCaption ? (
-        <div className="property-detail-unit-block__head">
-          <h3 className="property-detail-unit-block__title">{blockCaption.propertyName}</h3>
-          <div className="property-detail-unit-block__meta">
-            <span className="property-detail-unit-block__count">
-              {blockRowCount} {blockRowCount === 1 ? "row" : "rows"}
-            </span>
-            <span className="property-detail-unit-block__total money">
-              Total balance: {formatMoney(blockCaption.totalBalance)}
-            </span>
-          </div>
-        </div>
-      ) : null}
-      {showColumnsControl ? (
+        <PropertyBlockHead blockCaption={blockCaption} blockRowCount={blockRowCount} />
+      ) : showColumnsButton ? (
         <div className="unit-detail-table-toolbar">
-          <button
-            type="button"
-            className="unit-detail-columns-btn"
-            onClick={() => setPrefsOpen(true)}
-            title="Choose which columns to show and their order"
-          >
-            <span className="unit-detail-columns-btn__icon" aria-hidden>
-              <Columns3 size={17} strokeWidth={2.25} />
-            </span>
-            <span className="unit-detail-columns-btn__text">Columns</span>
-          </button>
+          <UnitDetailColumnsButton onClick={handleOpenColumnPrefs} />
         </div>
       ) : null}
-      <div className="table-wrap table-wrap--report">
-        <table className="data-table data-table-unit-detail">
-          <thead>
-            <tr>{headerRow1}</tr>
-            {hasLastPayment ? <tr>{headerRow2}</tr> : null}
+      <div className="property-detail-unit-block__table">
+        <div className="table-wrap table-wrap--report table-wrap--unit-detail">
+          <table className="data-table data-table-unit-detail">
+          {tableColgroup}
+          <thead className="unit-detail-thead">
+            <tr>{headerRow}</tr>
           </thead>
           <tbody>
             {sortedUnits.map((u, idx) => {
@@ -534,9 +608,10 @@ export default function UnitDetailsTable({
               );
             })}
           </tbody>
-        </table>
+          </table>
+        </div>
       </div>
-      {showColumnsControl ? (
+      {renderColumnPrefsModal ? (
         <UnitDetailColumnPrefsModal
           open={prefsOpen}
           companyId={companyId}

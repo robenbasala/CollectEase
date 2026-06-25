@@ -11,6 +11,7 @@ import {
   Shield
 } from "lucide-react";
 import { getCompanyDisplayName } from "../config/company.js";
+import { APP_LOGO_URL } from "../lib/appLogo.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import MicrosoftAccountConnect from "./MicrosoftAccountConnect";
 
@@ -49,10 +50,35 @@ export default function Navbar({ regions, selectedRegion, onSelectRegion, loadin
   const { user, canOpenAdmin, logout, firebaseUser } = useAuth();
   const showRegionBar = location.pathname === "/";
   const envLabel = getCompanyDisplayName();
-  const companyLabel = (branding?.companyDisplayName && String(branding.companyDisplayName).trim()) || envLabel;
+  const companyLabel =
+    (branding?.companyDisplayName && String(branding.companyDisplayName).trim()) ||
+    (branding?.companyName && String(branding.companyName).trim()) ||
+    envLabel;
 
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
+  const navRef = useRef(null);
+
+  useEffect(() => {
+    const el = navRef.current;
+    if (!el) return;
+
+    const syncNavStickyOffset = () => {
+      const h = Math.ceil(el.getBoundingClientRect().height);
+      document.documentElement.style.setProperty("--collectease-nav-sticky-h", `${h}px`);
+    };
+
+    syncNavStickyOffset();
+
+    const ro = new ResizeObserver(syncNavStickyOffset);
+    ro.observe(el);
+    window.addEventListener("resize", syncNavStickyOffset);
+
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", syncNavStickyOffset);
+    };
+  }, [showRegionBar]);
 
   useEffect(() => {
     setMenuOpen(false);
@@ -84,17 +110,22 @@ export default function Navbar({ regions, selectedRegion, onSelectRegion, loadin
   const role = roleLabel(user?.role);
 
   return (
-    <header className="navbar navbar--glass">
+    <header ref={navRef} className="navbar navbar--glass">
       <div className="navbar-row navbar-row--main">
         <NavLink to="/" className="brand brand--stack" end onClick={closeMenu}>
           {branding?.logoDataUrl ? (
-            <img src={branding.logoDataUrl} alt="" className="brand-logo-img" width={28} height={28} />
+            <img
+              src={branding.logoDataUrl}
+              alt=""
+              className="brand-logo-img"
+              width={28}
+              height={28}
+            />
           ) : (
-            <Building2 size={22} strokeWidth={2.25} />
+            <Building2 size={22} strokeWidth={2.25} aria-hidden />
           )}
           <span className="brand-text">
             <span className="brand-title">Collection Tracker</span>
-            <span className="brand-tagline">Portfolio &amp; collections</span>
           </span>
         </NavLink>
 
@@ -106,7 +137,9 @@ export default function Navbar({ regions, selectedRegion, onSelectRegion, loadin
 
         <div className="navbar-spacer" aria-hidden />
 
-        {firebaseUser ? (
+        <div className="navbar-profile-cluster">
+          <img src={APP_LOGO_URL} alt="CollectEase" className="navbar-profile-logo" width={200} height={40} />
+          {firebaseUser ? (
           <div className="nav-user" ref={menuRef}>
             <button
               type="button"
@@ -219,7 +252,8 @@ export default function Navbar({ regions, selectedRegion, onSelectRegion, loadin
               </div>
             ) : null}
           </div>
-        ) : null}
+          ) : null}
+        </div>
       </div>
       {showRegionBar ? (
         <div className="navbar-row navbar-row--regions" aria-label="Region selection">

@@ -1,22 +1,24 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import {
-  Calendar,
   ExternalLink,
   Highlighter,
   Mail,
   Pencil,
   Pin,
   PinOff,
-  RefreshCw,
-  StickyNote,
+  Save,
+  Scale,
   Trash2,
+  UserRound,
   X
 } from "lucide-react";
 import { api } from "../api/apiClient";
 import { getActiveMsAccount } from "../microsoft/msGraphMail";
 import LegalStatusCell from "./LegalStatusCell";
-import { buildErpDeepLink, erpLinkIdFromUnit, hmypersonFromUnit, tenantCodeFromUnit } from "../lib/erpDeepLink";
-import { formatPhoneDisplay, formatProperName } from "../lib/tenantDisplayFormat";
+import { buildErpDeepLink, erpLinkIdFromUnit, tenantCodeFromUnit } from "../lib/erpDeepLink";
+import { dateDueTextClass } from "../lib/followUpDateStyle.js";
+import { formatPhoneDisplay, formatProperName, phoneFromUnit } from "../lib/tenantDisplayFormat";
 import UnitLegalCasesPanel from "./UnitLegalCasesPanel";
 
 function formatMoney(n) {
@@ -78,7 +80,6 @@ export default function UnitDetailRowModal({
   const [noteFilter, setNoteFilter] = useState("all");
 
   const tc = useMemo(() => (unit ? tenantCodeFromUnit(unit) : ""), [unit]);
-  const hmy = useMemo(() => (unit ? hmypersonFromUnit(unit) : ""), [unit]);
 
   const rowQuery = useMemo(() => {
     if (!unit) return null;
@@ -141,6 +142,24 @@ export default function UnitDetailRowModal({
       onUnitsRefresh?.();
     } catch (e) {
       setErr(e.message || "Save failed");
+    } finally {
+      setSavingTenantFollow(false);
+    }
+  }
+
+  async function clearTenantFollowUp() {
+    if (!rowQuery) return;
+    setSavingTenantFollow(true);
+    setErr("");
+    try {
+      setTenantFollowInput("");
+      await api.patchDashboardUnitRow({
+        ...rowQuery,
+        tenantFollowUp: null
+      });
+      onUnitsRefresh?.();
+    } catch (e) {
+      setErr(e.message || "Could not clear follow-up date");
     } finally {
       setSavingTenantFollow(false);
     }
@@ -250,9 +269,9 @@ export default function UnitDetailRowModal({
   if (!open || !unit) return null;
 
   const erpHref = buildErpDeepLink(erpStaticLink, erpLinkIdFromUnit(unit));
-  const phone = unit.phone ?? unit.PhomeNumber ?? unit.phomeNumber ?? "";
+  const phone = phoneFromUnit(unit);
 
-  return (
+  const modalTree = (
     <div
       className="ud-row-modal-backdrop"
       role="presentation"
@@ -294,19 +313,11 @@ export default function UnitDetailRowModal({
                 <input readOnly value={formatProperName(unit.name ?? "")} />
               </div>
               <div className="ud-row-modal__field">
-                <label>Tenant code</label>
-                <input readOnly value={tc || "—"} />
-              </div>
-              <div className="ud-row-modal__field">
-                <label>Hmyperson</label>
-                <input readOnly value={hmy || "—"} />
-              </div>
-              <div className="ud-row-modal__field">
                 <label>Balance</label>
                 <input readOnly value={formatMoney(unit.balance)} />
               </div>
               <div className="ud-row-modal__field">
-                <label>Months delinquent</label>
+                <label>Months Delinquent</label>
                 <input readOnly value={unit.monthsDelinquent ?? ""} />
               </div>
               <div className="ud-row-modal__field">
@@ -327,48 +338,7 @@ export default function UnitDetailRowModal({
               </div>
             </div>
 
-            <div className="ud-row-modal__divider">
-              <span>Actions</span>
-            </div>
-
-            <div className="ud-row-modal__actions-block">
-              <label className="ud-row-modal__inline-label">Next legal follow up</label>
-              <input
-                type="text"
-                className="ud-row-modal__date ud-row-modal__date--readonly"
-                readOnly
-                value={formatDate(unit.nextFollowUp)}
-                title="Next legal follow up — from import and open legal cases (not editable)"
-              />
-              <p className="ud-row-modal__hint text-muted">Next legal follow up — earliest of import and open case follow-ups.</p>
-
-              <label className="ud-row-modal__inline-label ud-row-modal__inline-label--spaced">Tenant follow up</label>
-              <div className="ud-row-modal__follow-row">
-                <input
-                  type="date"
-                  className="ud-row-modal__date"
-                  value={tenantFollowInput}
-                  onChange={(e) => setTenantFollowInput(e.target.value)}
-                />
-                <button
-                  type="button"
-                  className="btn btn-primary ud-row-modal__iconbtn"
-                  disabled={savingTenantFollow}
-                  title="Save tenant follow-up"
-                  onClick={() => void saveTenantFollowUp()}
-                >
-                  <Calendar size={18} />
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-ghost ud-row-modal__iconbtn"
-                  title="Reset"
-                  onClick={() => setTenantFollowInput(toDateInputValue(unit.tenantFollowUp))}
-                >
-                  <RefreshCw size={18} />
-                </button>
-              </div>
-              <p className="ud-row-modal__hint text-muted">Your follow-up — saved on the dashboard for this tenant.</p>
+            <div className="ud-row-modal__details-footer">
 
               <div className="ud-row-modal__current-legal">
                 <span className="text-muted">Current legal status</span>
@@ -400,14 +370,63 @@ export default function UnitDetailRowModal({
           </section>
 
           <section className="ud-row-modal__panel ud-row-modal__panel--legal">
+            <h3 className="ud-row-modal__panel-title">
+              <Scale size={18} aria-hidden />
+              Legal Actions
+            </h3>
+            <div className="ud-row-modal__panel-followup ud-row-modal__panel-followup--legal">
+              <label className="ud-row-modal__inline-label">Next legal follow-up</label>
+              <input
+                type="text"
+                className={`ud-row-modal__date ud-row-modal__date--readonly ${dateDueTextClass(unit.nextFollowUp)}`}
+                readOnly
+                value={formatDate(unit.nextFollowUp)}
+                title="Next legal follow-up — from import and open legal cases (not editable)"
+              />
+              <p className="ud-row-modal__hint text-muted">
+                Earliest follow-up from import and open legal cases.
+              </p>
+            </div>
             <UnitLegalCasesPanel rowQuery={rowQuery} onUnitsRefresh={onUnitsRefresh} />
           </section>
 
           <section className="ud-row-modal__panel ud-row-modal__panel--notes">
             <h3 className="ud-row-modal__panel-title">
-              <StickyNote size={18} aria-hidden />
-              Notes
+              <UserRound size={18} aria-hidden />
+              Tenant Actions
             </h3>
+            <div className="ud-row-modal__panel-followup ud-row-modal__panel-followup--tenant">
+              <label className="ud-row-modal__inline-label">Tenant follow-up</label>
+              <div className="ud-row-modal__follow-row">
+                <input
+                  type="date"
+                  className={`ud-row-modal__date ${dateDueTextClass(tenantFollowInput || unit?.tenantFollowUp)}`}
+                  value={tenantFollowInput}
+                  onChange={(e) => setTenantFollowInput(e.target.value)}
+                />
+                <button
+                  type="button"
+                  className="btn btn-primary ud-row-modal__iconbtn"
+                  disabled={savingTenantFollow}
+                  title="Save tenant follow-up"
+                  aria-label="Save tenant follow-up"
+                  onClick={() => void saveTenantFollowUp()}
+                >
+                  <Save size={18} strokeWidth={2.25} />
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary ud-row-modal__iconbtn"
+                  disabled={savingTenantFollow}
+                  title="Clear date"
+                  aria-label="Clear tenant follow-up date"
+                  onClick={() => void clearTenantFollowUp()}
+                >
+                  <X size={18} strokeWidth={2.25} />
+                </button>
+              </div>
+              <p className="ud-row-modal__hint text-muted">Your follow-up — saved on the dashboard for this tenant.</p>
+            </div>
             <textarea
               className="ud-row-modal__note-input"
               rows={3}
@@ -612,4 +631,6 @@ export default function UnitDetailRowModal({
       ) : null}
     </div>
   );
+
+  return createPortal(modalTree, document.body);
 }

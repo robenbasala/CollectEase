@@ -10,6 +10,15 @@ export default function Dashboard() {
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [summaryRefreshTick, setSummaryRefreshTick] = useState(0);
+
+  useEffect(() => {
+    function onUnitDataChanged() {
+      setSummaryRefreshTick((x) => x + 1);
+    }
+    window.addEventListener("ct:unit-data-changed", onUnitDataChanged);
+    return () => window.removeEventListener("ct:unit-data-changed", onUnitDataChanged);
+  }, []);
 
   useEffect(() => {
     if (!selectedRegion) {
@@ -32,7 +41,7 @@ export default function Dashboard() {
     return () => {
       cancelled = true;
     };
-  }, [selectedRegion]);
+  }, [selectedRegion, summaryRefreshTick]);
 
   if (!selectedRegion) {
     return (

@@ -11,6 +11,8 @@ router.get("/portfolios", wrap(ctrl.getPortfolios));
 router.get("/properties", wrap(ctrl.getProperties));
 router.get("/summary", wrap(ctrl.getSummary));
 router.get("/units", wrap(ctrl.getUnits));
+router.get("/unit-detail-columns", wrap(ctrl.getUserUnitDetailColumnPrefs));
+router.put("/unit-detail-columns", wrap(ctrl.putUserUnitDetailColumnPrefs));
 router.patch("/unit-row", wrap(ctrl.patchUnitRow));
 router.get("/unit-notes", wrap(ctrl.getUnitNotes));
 router.post("/unit-notes", wrap(ctrl.postUnitNote));

@@ -6,7 +6,9 @@ BEGIN
   CREATE TABLE dbo.Companies (
     Id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
     Name NVARCHAR(200) NOT NULL,
-    CONSTRAINT UQ_Companies_Name UNIQUE (Name)
+    DataSource NVARCHAR(50) NULL,
+    CONSTRAINT UQ_Companies_Name UNIQUE (Name),
+    CONSTRAINT CK_Companies_DataSource CHECK (DataSource IS NULL OR DataSource IN (N'Yardi', N'Appfolio', N'Landlord'))
   );
 END
 GO

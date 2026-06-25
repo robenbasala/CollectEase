@@ -1,13 +1,30 @@
-import { useCallback, useEffect, useState } from "react";
-import { Building2, FolderKanban, GitBranch, LayoutGrid, MapPinned, Users } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import {
+  Building2,
+  Check,
+  FolderKanban,
+  GitBranch,
+  LayoutGrid,
+  MapPinned,
+  Search,
+  Users
+} from "lucide-react";
 import { Trash2, X } from "lucide-react";
 import { api } from "../api/apiClient";
-import CompanyDataflowsPanel from "../components/CompanyDataflowsPanel";
+import AdminPanel from "../components/AdminPanel";
+import DataverseEtlWizard from "../components/DataverseEtlWizard";
 import AdminUsersPanel from "../components/AdminUsersPanel";
 import PageHeader from "../components/PageHeader";
 import PropertyLegalStatusOptionsCard from "../components/PropertyLegalStatusOptionsCard";
 import Spinner from "../components/Spinner";
 import { useAuth } from "../context/AuthContext.jsx";
+import {
+  COMPANY_DATA_SOURCES,
+  companyDataSourceCardClass,
+  companyDataSourceDisplayLabel,
+  companyDataSourcePillClass
+} from "../constants/companyDataSources.js";
 
 function Modal({ title, children, onClose, onSave, saveLabel = "Save" }) {
   return (
@@ -65,6 +82,7 @@ function DeleteConfirmModal({ pending, onCancel, onConfirm, deleting }) {
 export default function AdminPage() {
   const { user, isSuperAdmin, effectiveCompanyId, canOpenAdmin, setEffectiveCompanyId } = useAuth();
   const workspaceCompanyId = isSuperAdmin ? effectiveCompanyId ?? user?.companyId ?? null : user?.companyId ?? null;
+  const navigate = useNavigate();
 
   const [activeTab, setActiveTab] = useState(() =>
     isSuperAdmin ? "companies" : canOpenAdmin ? "users" : "structure"
@@ -80,8 +98,11 @@ export default function AdminPage() {
 
   const [companies, setCompanies] = useState([]);
   const [newCompanyName, setNewCompanyName] = useState("");
+  const [newCompanyDataSource, setNewCompanyDataSource] = useState("Yardi");
   const [createCompanyBusy, setCreateCompanyBusy] = useState(false);
   const [createCompanyMsg, setCreateCompanyMsg] = useState("");
+  const [editCompanyBusy, setEditCompanyBusy] = useState(false);
+  const [companySearch, setCompanySearch] = useState("");
 
   const [regions, setRegions] = useState([]);
   const [portfolios, setPortfolios] = useState([]);
@@ -168,8 +189,12 @@ export default function AdminPage() {
     setCreateCompanyBusy(true);
     setCreateCompanyMsg("");
     try {
-      await api.postCompany(name);
+      await api.postCompany({
+        name,
+        dataSource: newCompanyDataSource.trim() || null
+      });
       setNewCompanyName("");
+      setNewCompanyDataSource("Yardi");
       const data = await api.listCompanies();
       setCompanies(data.companies || []);
       setCreateCompanyMsg("Company created.");
@@ -179,6 +204,51 @@ export default function AdminPage() {
       setCreateCompanyBusy(false);
     }
   }
+
+  async function saveCompanyEdit(companyId) {
+    const name = newCompanyName.trim();
+    if (!name) {
+      setCreateCompanyMsg("Enter a company name");
+      return;
+    }
+    setEditCompanyBusy(true);
+    setCreateCompanyMsg("");
+    try {
+      await api.putCompany(companyId, {
+        name,
+        dataSource: newCompanyDataSource.trim() || null
+      });
+      setNewCompanyName("");
+      setNewCompanyDataSource("Yardi");
+      const data = await api.listCompanies();
+      setCompanies(data.companies || []);
+      setCreateCompanyMsg("Company updated.");
+    } catch (e) {
+      setCreateCompanyMsg(e.message || "Failed to update company");
+    } finally {
+      setEditCompanyBusy(false);
+    }
+  }
+
+  const navCompanyId = effectiveCompanyId ?? user?.companyId ?? null;
+
+  const companyLists = useMemo(() => {
+    const q = companySearch.trim().toLowerCase();
+    const matches = (c) => {
+      if (!q) return true;
+      const name = String(c.name || "").toLowerCase();
+      const id = String(c.id ?? "");
+      const source = String(c.dataSource || "").toLowerCase();
+      return name.includes(q) || id.includes(q) || source.includes(q);
+    };
+    const filtered = companies.filter(matches);
+    const active =
+      navCompanyId != null
+        ? companies.find((c) => Number(c.id) === Number(navCompanyId)) || null
+        : null;
+    const sorted = [...filtered].sort((a, b) => Number(a.id) - Number(b.id));
+    return { active, sorted, total: filtered.length };
+  }, [companies, companySearch, navCompanyId]);
 
   useEffect(() => {
     if (!regionId) {
@@ -297,6 +367,16 @@ export default function AdminPage() {
         await api.deleteAdminProperty(item.id);
         if (portfolioId) await loadProperties(portfolioId);
       }
+      if (type === "company") {
+        await api.deleteCompany(item.id);
+        const data = await api.listCompanies();
+        const nextCompanies = data.companies || [];
+        setCompanies(nextCompanies);
+        if (Number(workspaceCompanyId) === Number(item.id)) {
+          const fallback = nextCompanies[0]?.id != null ? Number(nextCompanies[0].id) : null;
+          setEffectiveCompanyId(fallback);
+        }
+      }
       setPendingDelete(null);
     } catch (e) {
       setPendingDelete(null);
@@ -304,6 +384,93 @@ export default function AdminPage() {
     } finally {
       setDeleteLoading(false);
     }
+  }
+
+  function renderCompanyCard(c, selected) {
+    const uc = Number(c.userCount ?? 0);
+    const rc = Number(c.regionCount ?? 0);
+    const pc = Number(c.portfolioCount ?? 0);
+    const prc = Number(c.propertyCount ?? 0);
+    const sourceLabel = companyDataSourceDisplayLabel(c.dataSource);
+    const sourceClass = companyDataSourceCardClass(c.dataSource);
+    const sourcePillClass = companyDataSourcePillClass(c.dataSource);
+
+    return (
+      <div key={c.id} role="listitem" className="admin-company-card-item">
+        <div
+          className={`admin-company-card${selected ? " admin-company-card--selected" : ""}${sourceClass ? ` ${sourceClass}` : ""}`}
+        >
+          <button
+            type="button"
+            className="admin-company-card__select"
+            onClick={() => {
+              setEffectiveCompanyId(Number(c.id));
+              navigate("/");
+            }}
+            title={`Set as workspace — ${sourceLabel}`}
+          >
+            <span className={`admin-company-card__source-pill ${sourcePillClass}`}>{sourceLabel}</span>
+            {selected ? (
+              <span className="admin-company-card__workspace-mark" aria-label="Current workspace">
+                <Check size={22} strokeWidth={3} aria-hidden />
+              </span>
+            ) : null}
+            <span className="admin-company-card__icon" aria-hidden>
+              <Building2 size={26} strokeWidth={2} />
+            </span>
+            <span className="admin-company-card__name">{c.name}</span>
+            <span className="admin-company-card__id">ID {c.id}</span>
+            <dl className="admin-company-card__stats">
+              <div className="admin-company-card__stat">
+                <dt>
+                  <Users size={15} strokeWidth={2} aria-hidden />
+                  <span>Users</span>
+                </dt>
+                <dd>{uc}</dd>
+              </div>
+              <div className="admin-company-card__stat">
+                <dt>
+                  <MapPinned size={15} strokeWidth={2} aria-hidden />
+                  <span>Regions</span>
+                </dt>
+                <dd>{rc}</dd>
+              </div>
+              <div className="admin-company-card__stat">
+                <dt>
+                  <FolderKanban size={15} strokeWidth={2} aria-hidden />
+                  <span>Portfolios</span>
+                </dt>
+                <dd>{pc}</dd>
+              </div>
+              <div className="admin-company-card__stat">
+                <dt>
+                  <LayoutGrid size={15} strokeWidth={2} aria-hidden />
+                  <span>Properties</span>
+                </dt>
+                <dd>{prc}</dd>
+              </div>
+            </dl>
+          </button>
+          <div className="admin-company-card__actions">
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => {
+                setNewCompanyName(String(c.name || ""));
+                setNewCompanyDataSource(c.dataSource || "Yardi");
+                setModal({ type: "company", mode: "edit", item: c });
+              }}
+              disabled={editCompanyBusy}
+            >
+              Edit
+            </button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => askDelete("company", c)}>
+              Delete
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -369,7 +536,7 @@ export default function AdminPage() {
             onClick={() => setActiveTab("dataflows")}
           >
             <GitBranch size={14} style={{ marginRight: "0.25rem", verticalAlign: "-0.1em" }} aria-hidden />
-            Dataflows
+            Dataverse import
           </button>
         ) : null}
       </div>
@@ -381,16 +548,14 @@ export default function AdminPage() {
           aria-labelledby="admin-tab-companies"
           id="admin-panel-companies"
         >
-          <div className="card" style={{ padding: "1rem", marginBottom: "1.25rem" }}>
-            <h2 className="page-title" style={{ fontSize: "1.1rem", marginBottom: "0.5rem" }}>
-              Companies
-            </h2>
-            <p className="text-muted" style={{ marginBottom: "0.75rem", fontSize: "0.9rem" }}>
-              Create a company, then choose it in the navbar to manage regions and invite users for that tenant.
+          <div className="card admin-companies-create-card">
+            <h2 className="page-title admin-companies-create-card__title">Create company</h2>
+            <p className="text-muted admin-companies-create-card__hint">
+              Add a tenant, then pick it below to manage regions and invite users.
             </p>
-            <div className="field" style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", alignItems: "flex-end" }}>
-              <div style={{ flex: "1 1 12rem" }}>
-                <label htmlFor="new-co">New company name</label>
+            <div className="admin-companies-create-form">
+              <div className="field admin-companies-create-form__name">
+                <label htmlFor="new-co">Company name</label>
                 <input
                   id="new-co"
                   value={newCompanyName}
@@ -398,86 +563,88 @@ export default function AdminPage() {
                   placeholder="e.g. Acme HOA"
                 />
               </div>
-              <button type="button" className="btn btn-primary" disabled={createCompanyBusy} onClick={() => void createCompany()}>
+              <div className="field admin-companies-create-form__source">
+                <label htmlFor="new-co-source">Data source</label>
+                <select
+                  id="new-co-source"
+                  className="company-select"
+                  value={newCompanyDataSource}
+                  onChange={(e) => setNewCompanyDataSource(e.target.value)}
+                >
+                  <option value="">Not set</option>
+                  {COMPANY_DATA_SOURCES.map((s) => (
+                    <option key={s.value} value={s.value}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <button
+                type="button"
+                className="btn btn-primary admin-companies-create-form__submit"
+                disabled={createCompanyBusy}
+                onClick={() => void createCompany()}
+              >
                 {createCompanyBusy ? "Creating…" : "Create company"}
               </button>
             </div>
-            {createCompanyMsg ? (
-              <p className="text-muted" style={{ marginTop: "0.5rem", fontSize: "0.9rem" }}>
-                {createCompanyMsg}
-              </p>
-            ) : null}
+            {createCompanyMsg ? <p className="text-muted admin-companies-create-card__msg">{createCompanyMsg}</p> : null}
           </div>
 
-          <div className="card" style={{ padding: "1rem" }}>
-            <h3 className="page-title" style={{ fontSize: "1rem", marginBottom: "0.35rem" }}>
-              All companies
-            </h3>
-            <p className="text-muted admin-company-gallery-hint">
-              Click a card to set that company as your workspace (same as the company selector in the navbar).
-            </p>
-            {companies.length === 0 ? (
-              <p className="text-muted" style={{ margin: 0, fontSize: "0.9rem" }}>
-                No companies loaded yet.
-              </p>
-            ) : (
-              <div className="admin-company-gallery" role="list">
-                {companies.map((c) => {
-                  const navCompanyId = effectiveCompanyId ?? user?.companyId ?? null;
-                  const selected =
-                    isSuperAdmin && navCompanyId != null && Number(navCompanyId) === Number(c.id);
-                  const uc = Number(c.userCount ?? 0);
-                  const rc = Number(c.regionCount ?? 0);
-                  const pc = Number(c.portfolioCount ?? 0);
-                  const prc = Number(c.propertyCount ?? 0);
-                  return (
-                    <button
-                      key={c.id}
-                      type="button"
-                      role="listitem"
-                      className={`admin-company-card${selected ? " admin-company-card--selected" : ""}`}
-                      onClick={() => setEffectiveCompanyId(Number(c.id))}
-                      title="Set as workspace company in the navbar"
-                    >
-                      <span className="admin-company-card__icon" aria-hidden>
-                        <Building2 size={26} strokeWidth={2} />
-                      </span>
-                      <span className="admin-company-card__name">{c.name}</span>
-                      <dl className="admin-company-card__stats">
-                        <div className="admin-company-card__stat">
-                          <dt>
-                            <Users size={15} strokeWidth={2} aria-hidden />
-                            <span>Users</span>
-                          </dt>
-                          <dd>{uc}</dd>
-                        </div>
-                        <div className="admin-company-card__stat">
-                          <dt>
-                            <MapPinned size={15} strokeWidth={2} aria-hidden />
-                            <span>Regions</span>
-                          </dt>
-                          <dd>{rc}</dd>
-                        </div>
-                        <div className="admin-company-card__stat">
-                          <dt>
-                            <FolderKanban size={15} strokeWidth={2} aria-hidden />
-                            <span>Portfolios</span>
-                          </dt>
-                          <dd>{pc}</dd>
-                        </div>
-                        <div className="admin-company-card__stat">
-                          <dt>
-                            <LayoutGrid size={15} strokeWidth={2} aria-hidden />
-                            <span>Properties</span>
-                          </dt>
-                          <dd>{prc}</dd>
-                        </div>
-                      </dl>
-                      {selected ? <span className="admin-company-card__badge">Current workspace</span> : null}
-                    </button>
-                  );
-                })}
+          <div className="card admin-companies-list-card">
+            <div className="admin-company-panel-head">
+              <div>
+                <h3 className="page-title admin-company-panel-head__title">All companies</h3>
+                <p className="text-muted admin-company-gallery-hint">
+                  Click a card to set your workspace. Sorted by ID.
+                </p>
               </div>
+              <div className="admin-company-search">
+                <Search size={17} strokeWidth={2} aria-hidden className="admin-company-search__icon" />
+                <input
+                  id="company-search"
+                  type="search"
+                  className="admin-company-search__input"
+                  value={companySearch}
+                  onChange={(e) => setCompanySearch(e.target.value)}
+                  placeholder="Search name, ID, or source…"
+                  aria-label="Search companies"
+                />
+              </div>
+            </div>
+
+            <ul className="admin-company-source-legend" aria-label="Data source colors">
+              {COMPANY_DATA_SOURCES.map((s) => (
+                <li key={s.value}>
+                  <span
+                    className={`admin-company-source-legend__swatch admin-company-source-legend__swatch--${s.value.toLowerCase()}`}
+                  />
+                  {s.label}
+                </li>
+              ))}
+            </ul>
+
+            {companies.length === 0 ? (
+              <p className="text-muted admin-company-empty">No companies loaded yet.</p>
+            ) : companyLists.total === 0 ? (
+              <p className="text-muted admin-company-empty">No companies match your search.</p>
+            ) : (
+              <>
+                <p className="admin-company-active-line">
+                  {companyLists.active ? (
+                    <>
+                      Active: <strong>{companyLists.active.name}</strong>
+                    </>
+                  ) : (
+                    <span className="text-muted">No workspace selected — click a card below.</span>
+                  )}
+                </p>
+                <div className="admin-company-gallery admin-company-gallery--row" role="list">
+                  {companyLists.sorted.map((c) =>
+                    renderCompanyCard(c, navCompanyId != null && Number(c.id) === Number(navCompanyId))
+                  )}
+                </div>
+              </>
             )}
           </div>
         </div>
@@ -566,11 +733,9 @@ export default function AdminPage() {
       ) : null}
 
       {activeTab === "dataflows" && canOpenAdmin ? (
-        <CompanyDataflowsPanel
-          workspaceCompanyId={workspaceCompanyId}
-          companies={companies}
-          isSuperAdmin={isSuperAdmin}
-        />
+        <div className="admin-page-panel" role="tabpanel" aria-labelledby="admin-tab-dataflows" id="admin-panel-dataflows">
+          <DataverseEtlWizard key={workspaceCompanyId ?? "none"} />
+        </div>
       ) : null}
 
       {modal?.type === "region" && (
@@ -582,6 +747,31 @@ export default function AdminPage() {
           <div className="field">
             <label htmlFor="rn">Name</label>
             <input id="rn" value={formName} onChange={(e) => setFormName(e.target.value)} />
+          </div>
+        </Modal>
+      )}
+
+      {modal?.type === "company" && (
+        <Modal title="Edit company" onClose={() => setModal(null)} onSave={() => void saveCompanyEdit(modal.item.id)}>
+          <div className="field">
+            <label htmlFor="company-name-edit">Company name</label>
+            <input id="company-name-edit" value={newCompanyName} onChange={(e) => setNewCompanyName(e.target.value)} />
+          </div>
+          <div className="field">
+            <label htmlFor="company-source-edit">Data source</label>
+            <select
+              id="company-source-edit"
+              className="company-select"
+              value={newCompanyDataSource}
+              onChange={(e) => setNewCompanyDataSource(e.target.value)}
+            >
+              <option value="">Not set</option>
+              {COMPANY_DATA_SOURCES.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
           </div>
         </Modal>
       )}

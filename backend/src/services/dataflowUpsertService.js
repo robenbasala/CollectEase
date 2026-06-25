@@ -1,6 +1,7 @@
 "use strict";
 
 const { sql, getPool } = require("../db");
+const { parseNumericValue, extractODataPrimitive } = require("./etl/etlValueTransform");
 
 /**
  * @param {{ column: string, dataType: string, maxLength: number|null, isIdentity: boolean, isComputed: boolean }} col
@@ -9,13 +10,13 @@ const { sql, getPool } = require("../db");
 function coerceValue(col, raw) {
   if (raw === undefined || raw === null || raw === "") return null;
   const dt = String(col.dataType || "").toLowerCase();
+  const unwrapped = extractODataPrimitive(raw);
   if (dt.includes("int") && !dt.includes("point")) {
-    const n = Number(String(raw).replace(/,/g, "").trim());
-    return Number.isFinite(n) ? Math.trunc(n) : null;
+    const n = parseNumericValue(unwrapped);
+    return n == null ? null : Math.trunc(n);
   }
   if (dt === "decimal" || dt === "numeric" || dt === "money" || dt === "smallmoney" || dt === "float" || dt === "real") {
-    const n = Number(String(raw).replace(/,/g, "").trim());
-    return Number.isFinite(n) ? n : null;
+    return parseNumericValue(unwrapped);
   }
   if (dt === "bit") {
     const s = String(raw).trim().toLowerCase();

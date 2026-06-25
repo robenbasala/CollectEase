@@ -9,9 +9,12 @@ export default function PageHeader({
   backLabel = "Back",
   backTo = "/",
   onBack,
-  actions = null
+  actions = null,
+  children = null,
+  className = ""
 }) {
   const navigate = useNavigate();
+  const isToolbar = Boolean(children);
 
   const backContent = (
     <>
@@ -36,21 +39,39 @@ export default function PageHeader({
     </Link>
   );
 
+  const headerClass = ["page-header", isToolbar ? "page-header--toolbar" : "", className]
+    .filter(Boolean)
+    .join(" ");
+
   return (
-    <header className="page-header">
-      <div className="page-header__side page-header__side--left">{backControl}</div>
-      <div className="page-header__main">
-        <h1 className="page-header__title">
-          {icon ? (
-            <span className="page-header__icon" aria-hidden>
-              {icon}
-            </span>
+    <header className={headerClass}>
+      {isToolbar ? (
+        <div className="page-header__toolbar">
+          {showBack ? (
+            <>
+              <div className="page-header__toolbar-back">{backControl}</div>
+              <div className="page-header__toolbar-divider" aria-hidden />
+            </>
           ) : null}
-          {title}
-        </h1>
-        {subtitle ? <p className="page-header__subtitle">{subtitle}</p> : null}
-      </div>
-      <div className="page-header__side page-header__side--right">{actions}</div>
+          <div className="page-header__main page-header__main--toolbar">{children}</div>
+        </div>
+      ) : (
+        <>
+          <div className="page-header__side page-header__side--left">{backControl}</div>
+          <div className="page-header__main">
+            <h1 className="page-header__title">
+              {icon ? (
+                <span className="page-header__icon" aria-hidden>
+                  {icon}
+                </span>
+              ) : null}
+              {title}
+            </h1>
+            {subtitle ? <p className="page-header__subtitle">{subtitle}</p> : null}
+          </div>
+          <div className="page-header__side page-header__side--right">{actions}</div>
+        </>
+      )}
     </header>
   );
 }

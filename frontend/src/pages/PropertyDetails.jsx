@@ -1,17 +1,19 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { Columns3, X } from "lucide-react";
+import { X } from "lucide-react";
 import { api } from "../api/apiClient";
 import { normalizeUnitDetailColumnPrefs } from "../constants/unitDetailColumns.js";
 import { getActiveCompanyId } from "../config/company.js";
 import PageHeader from "../components/PageHeader";
 import Spinner from "../components/Spinner";
-import UnitDetailsTable from "../components/UnitDetailsTable";
+import UnitDetailsTable, { UnitDetailColumnsButton } from "../components/UnitDetailsTable";
 import UnitDetailColumnPrefsModal from "../components/UnitDetailColumnPrefsModal";
 import PropertyMultiSelect from "../components/PropertyMultiSelect";
 
 const ALERT_KEYS = new Set([
+  "missingTenantFollowUp",
   "missingFollowUp",
+  "pastDueTenantFollowUp",
   "pastDueFollowUp",
   "dueTodayFollowUp",
   "requiresLegal",
@@ -40,15 +42,17 @@ function buildEmailPreviewContextFromSettings(s) {
 
 const SLICE_CHIP_LABELS = {
   occupied: "Slice: Occupied",
-  lt1: "Slice: < 1 mo vs rent",
-  ge1: "Slice: ≥ 1 mo vs rent",
-  missingFollowUp: "Slice: Missing legal follow up",
-  pastDueFollowUp: "Slice: Past due legal follow up",
-  dueTodayFollowUp: "Slice: Due today legal follow up",
-  requiresLegal: "Slice: Requires legal",
-  removeLegal: "Slice: Remove legal",
+  lt1: "Slice: Under 1 Month",
+  ge1: "Slice: 1 Month +",
+  missingTenantFollowUp: "Slice: Tenant Missing Follow-up",
+  missingFollowUp: "Slice: Tenant Missing Follow-up",
+  pastDueTenantFollowUp: "Slice: Tenant Past Due Follow-up",
+  pastDueFollowUp: "Slice: Legal Past Due Follow-up",
+  dueTodayFollowUp: "Slice: Legal Due Today Follow-up",
+  requiresLegal: "Slice: Requires Legal",
+  removeLegal: "Slice: Close Legal",
   zeroBalance: "Slice: Zero balance",
-  lessThanOneMonth: "Slice: < 1 mo delinquent",
+  lessThanOneMonth: "Slice: Under 1 Month",
   oneToUnderThreeMonths: "Slice: 1–<3 mo",
   threePlusMonths: "Slice: 3+ mo",
   inLegal: "Slice: In legal"
@@ -122,12 +126,20 @@ export default function PropertyDetails() {
   const [emailPreviewContext, setEmailPreviewContext] = useState(() => buildEmailPreviewContextFromSettings({}));
   const [legalPresets, setLegalPresets] = useState([]);
   const [unitsRefreshTick, setUnitsRefreshTick] = useState(0);
+  const [summaryRefreshTick, setSummaryRefreshTick] = useState(0);
+  const prevSummaryRegionRef = useRef(null);
+
+  function refreshUnitAndSummary() {
+    setUnitsRefreshTick((x) => x + 1);
+    setSummaryRefreshTick((x) => x + 1);
+    window.dispatchEvent(new CustomEvent("ct:unit-data-changed"));
+  }
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const data = await api.getAdminUnitDetailColumnPrefs();
+        const data = await api.getDashboardUnitDetailColumnPrefs();
         if (!cancelled) {
           setUnitDetailColumnPrefs(
             normalizeUnitDetailColumnPrefs({
@@ -176,11 +188,15 @@ export default function PropertyDetails() {
   useEffect(() => {
     if (!region) {
       setSummary(null);
+      prevSummaryRegionRef.current = null;
       return;
     }
+    const regionChanged = prevSummaryRegionRef.current !== region;
+    prevSummaryRegionRef.current = region;
+    const showBlockingLoad = summary === null || regionChanged;
     let cancelled = false;
     (async () => {
-      setLoadingSummary(true);
+      if (showBlockingLoad) setLoadingSummary(true);
       setError("");
       try {
         const data = await api.getDashboardSummary(region);
@@ -194,7 +210,7 @@ export default function PropertyDetails() {
     return () => {
       cancelled = true;
     };
-  }, [region]);
+  }, [region, summaryRefreshTick]);
 
   const propertyOptions = useMemo(() => {
     if (!summary) return [];
@@ -213,9 +229,10 @@ export default function PropertyDetails() {
       setUnits([]);
       return;
     }
+    const showBlockingLoad = units.length === 0;
     let cancelled = false;
     (async () => {
-      setLoadingUnits(true);
+      if (showBlockingLoad) setLoadingUnits(true);
       setError("");
       try {
         const slice =
@@ -274,14 +291,23 @@ export default function PropertyDetails() {
   }, [units]);
 
   const legalStatusChoices = useMemo(() => {
-    const s = new Set();
+    const seen = new Set();
+    const out = [];
     for (const x of legalPresets) {
-      if (x) s.add(String(x).trim());
+      const s = String(x).trim();
+      if (s && !seen.has(s)) {
+        seen.add(s);
+        out.push(s);
+      }
     }
     for (const x of legalOptions) {
-      if (x) s.add(String(x).trim());
+      const s = String(x).trim();
+      if (s && !seen.has(s)) {
+        seen.add(s);
+        out.push(s);
+      }
     }
-    return [...s].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+    return out;
   }, [legalPresets, legalOptions]);
 
   const unitsGroupedByProperty = useMemo(() => {
@@ -352,13 +378,15 @@ export default function PropertyDetails() {
   const showClearAllButton = hasSliceChip || hasSearchChips;
 
   const activeFilterChips = [];
-  for (const p of selectedProperties) {
-    activeFilterChips.push({
-      key: `prop-${p}`,
-      label: p,
-      aria: `Remove property ${p}`,
-      onClear: () => navigateWithProperties(selectedProperties.filter((x) => x !== p))
-    });
+  if (selectedProperties.length > 1) {
+    for (const p of selectedProperties) {
+      activeFilterChips.push({
+        key: `prop-${p}`,
+        label: p,
+        aria: `Remove property ${p}`,
+        onClear: () => navigateWithProperties(selectedProperties.filter((x) => x !== p))
+      });
+    }
   }
   if (nameFilter.trim()) {
     activeFilterChips.push({
@@ -395,89 +423,89 @@ export default function PropertyDetails() {
 
   return (
     <div className="page">
-      <PageHeader title="Property details" backTo={-1} />
-
-      {!region && (
-        <div className="card" style={{ padding: "1rem", marginBottom: "1rem" }}>
-          <span className="text-warn">Missing region in URL.</span> Open this page from the dashboard or add{" "}
-          <code>?region=YourRegion</code> to the query string.
-        </div>
-      )}
-
-      <div className="property-detail-stack">
-        <div
-          className={`card property-detail-filters-card${propertyDropdownOpen ? " property-detail-filters-card--dropdown-open" : ""}`}
-        >
-          <div className="filters filters--detail-toolbar">
-            <div className="field field--properties">
-              <label htmlFor="prop-dropdown">Property</label>
-              <PropertyMultiSelect
-                id="prop-dropdown"
-                options={propertyOptions}
-                value={selectedProperties}
-                onChange={navigateWithProperties}
-                onOpenChange={setPropertyDropdownOpen}
-                disabled={!region || loadingSummary}
-              />
-            </div>
-            <div className="field field--text">
-              <label htmlFor="name">Name</label>
-              <input
-                id="name"
-                value={nameFilter}
-                onChange={(e) => setNameFilter(e.target.value)}
-                placeholder="Search…"
-              />
-            </div>
-            <div className="field field--text">
-              <label htmlFor="unit">Unit</label>
-              <input
-                id="unit"
-                value={unitFilter}
-                onChange={(e) => setUnitFilter(e.target.value)}
-                placeholder="Search…"
-              />
-            </div>
-            <div className="field field--legal">
-              <label htmlFor="ls">Legal</label>
-              <select id="ls" value={legalStatus} onChange={(e) => setLegalStatus(e.target.value)}>
-                <option value="">All</option>
-                {legalOptions.map((ls) => (
-                  <option key={ls} value={ls}>
-                    {ls}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="field field--slice">
-              <label htmlFor="dashSlice">Slice</label>
-              <select
-                id="dashSlice"
-                value={dashboardSliceValue}
-                onChange={(e) => onDashboardSliceChange(e.target.value)}
-              >
-                <option value="all">All units</option>
-                <option value="occupied">Occupied</option>
-                <optgroup label="Collection">
-                  <option value="lt1">&lt; 1 mo vs rent</option>
-                  <option value="ge1">≥ 1 mo vs rent</option>
-                </optgroup>
-                <optgroup label="Alerts">
-                  <option value="missingFollowUp">Missing legal FU</option>
-                  <option value="pastDueFollowUp">Past due legal FU</option>
-                  <option value="dueTodayFollowUp">Due today legal FU</option>
-                  <option value="requiresLegal">Requires legal</option>
-                  <option value="removeLegal">Remove legal</option>
-                </optgroup>
-                <optgroup label="Delinquent">
-                  <option value="zeroBalance">Zero balance</option>
-                  <option value="lessThanOneMonth">&lt; 1 mo</option>
-                  <option value="oneToUnderThreeMonths">1–&lt;3 mo</option>
-                  <option value="threePlusMonths">3+ mo</option>
-                  <option value="inLegal">In legal</option>
-                </optgroup>
-              </select>
-            </div>
+      <PageHeader
+        backTo={-1}
+        className={propertyDropdownOpen ? "page-header--dropdown-open" : ""}
+      >
+        <div className="property-detail-toolbar">
+          <div className="property-detail-toolbar__row">
+            <div className="filters filters--detail-toolbar">
+          <div className="field field--properties">
+            <label htmlFor="prop-dropdown">Property</label>
+            <PropertyMultiSelect
+              id="prop-dropdown"
+              options={propertyOptions}
+              value={selectedProperties}
+              onChange={navigateWithProperties}
+              onOpenChange={setPropertyDropdownOpen}
+              disabled={!region || loadingSummary}
+            />
+          </div>
+          <div className="field field--text">
+            <label htmlFor="name">Name</label>
+            <input
+              id="name"
+              value={nameFilter}
+              onChange={(e) => setNameFilter(e.target.value)}
+              placeholder="Search…"
+            />
+          </div>
+          <div className="field field--text">
+            <label htmlFor="unit">Unit</label>
+            <input
+              id="unit"
+              value={unitFilter}
+              onChange={(e) => setUnitFilter(e.target.value)}
+              placeholder="Search…"
+            />
+          </div>
+          <div className="field field--legal">
+            <label htmlFor="ls">Legal</label>
+            <select id="ls" value={legalStatus} onChange={(e) => setLegalStatus(e.target.value)}>
+              <option value="">All</option>
+              {legalStatusChoices.map((ls) => (
+                <option key={ls} value={ls}>
+                  {ls}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="field field--slice">
+            <label htmlFor="dashSlice">Slice</label>
+            <select
+              id="dashSlice"
+              value={dashboardSliceValue}
+              onChange={(e) => onDashboardSliceChange(e.target.value)}
+            >
+              <option value="all">All units</option>
+              <option value="occupied">Occupied</option>
+              <optgroup label="Collection">
+                <option value="lt1">Under 1 Month</option>
+                <option value="ge1">1 Month +</option>
+              </optgroup>
+              <optgroup label="Alerts">
+                <option value="missingTenantFollowUp">Tenant Missing Follow-up</option>
+                <option value="pastDueTenantFollowUp">Tenant Past Due Follow-up</option>
+                <option value="pastDueFollowUp">Legal Past Due Follow-up</option>
+                <option value="dueTodayFollowUp">Legal Due Today Follow-up</option>
+                <option value="requiresLegal">Requires Legal</option>
+                <option value="removeLegal">Close Legal</option>
+              </optgroup>
+              <optgroup label="Delinquent">
+                <option value="zeroBalance">Zero balance</option>
+                <option value="lessThanOneMonth">Under 1 Month</option>
+                <option value="oneToUnderThreeMonths">1–&lt;3 mo</option>
+                <option value="threePlusMonths">3+ mo</option>
+                <option value="inLegal">In legal</option>
+              </optgroup>
+            </select>
+          </div>
+          </div>
+            {selectedProperties.length > 0 ? (
+              <div className="property-detail-toolbar__actions">
+                <UnitDetailColumnsButton onClick={() => setUnitDetailPrefsOpen(true)} />
+              </div>
+            ) : null}
           </div>
 
           {activeFilterChips.length > 0 && (
@@ -506,7 +534,16 @@ export default function PropertyDetails() {
             </div>
           )}
         </div>
+      </PageHeader>
 
+      {!region && (
+        <div className="card" style={{ padding: "1rem", marginBottom: "1rem" }}>
+          <span className="text-warn">Missing region in URL.</span> Open this page from the dashboard or add{" "}
+          <code>?region=YourRegion</code> to the query string.
+        </div>
+      )}
+
+      <div className="property-detail-stack">
         <div className="card property-detail-units-card">
           {region && !loadingSummary && selectedProperties.length === 0 && (
             <div className="unit-details-rowcount" role="status">
@@ -521,19 +558,6 @@ export default function PropertyDetails() {
               <Spinner />
             ) : (
               <div className="property-detail-units-stack">
-                <div className="unit-detail-table-toolbar unit-detail-table-toolbar--stack">
-                  <button
-                    type="button"
-                    className="unit-detail-columns-btn"
-                    onClick={() => setUnitDetailPrefsOpen(true)}
-                    title="Choose which columns to show and their order"
-                  >
-                    <span className="unit-detail-columns-btn__icon" aria-hidden>
-                      <Columns3 size={17} strokeWidth={2.25} />
-                    </span>
-                    <span className="unit-detail-columns-btn__text">Columns</span>
-                  </button>
-                </div>
                 <UnitDetailColumnPrefsModal
                   open={unitDetailPrefsOpen}
                   companyId={companyId}
@@ -561,7 +585,7 @@ export default function PropertyDetails() {
                       blockCaption={{ propertyName: g.property, totalBalance: g.totalBalance, rowCount: g.rows.length }}
                       emailPreviewContext={emailPreviewContext}
                       legalStatusChoices={legalStatusChoices}
-                      onUnitsRefresh={() => setUnitsRefreshTick((x) => x + 1)}
+                      onUnitsRefresh={refreshUnitAndSummary}
                     />
                   </section>
                 ))}

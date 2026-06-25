@@ -128,7 +128,15 @@ export const api = {
   patchAuthUser: (uid, body) => request("PATCH", `/auth/users/${encodeURIComponent(uid)}`, { body }),
 
   listCompanies: () => request("GET", "/companies", { omitCompanyId: true }),
-  postCompany: (name) => request("POST", "/companies", { body: { name } }),
+  postCompany: (body) =>
+    request("POST", "/companies", {
+      body: typeof body === "string" ? { name: body } : body
+    }),
+  putCompany: (id, body) =>
+    request("PUT", `/companies/${encodeURIComponent(id)}`, {
+      body: typeof body === "string" ? { name: body } : body
+    }),
+  deleteCompany: (id) => request("DELETE", `/companies/${encodeURIComponent(id)}`),
 
   getDashboardRegions: () => request("GET", "/dashboard/regions"),
   getDashboardPortfolios: (region) =>
@@ -156,6 +164,9 @@ export const api = {
     });
   },
 
+  getDashboardUnitDetailColumnPrefs: () => request("GET", "/dashboard/unit-detail-columns"),
+  putDashboardUnitDetailColumnPrefs: (body) =>
+    request("PUT", "/dashboard/unit-detail-columns", { body }),
   patchDashboardUnitRow: (body) => request("PATCH", "/dashboard/unit-row", { body }),
   getDashboardUnitNotes: (query) => request("GET", "/dashboard/unit-notes", { query }),
   postDashboardUnitNote: (body) => request("POST", "/dashboard/unit-notes", { body }),
@@ -227,23 +238,42 @@ export const api = {
   deleteAdminLegalStatusPresetOption: (listId, id) =>
     request("DELETE", `/admin/legal-status-preset-lists/${listId}/options/${id}`),
 
-  /* Company dataflows (admin): Excel → transform → SQL upsert */
-  listCompanyDataflows: (companyId) =>
-    request("GET", `/companies/${encodeURIComponent(companyId)}/dataflows`),
-  getDataflow: (id) => request("GET", `/dataflows/${encodeURIComponent(id)}`),
-  postCompanyDataflow: (companyId, body) =>
-    request("POST", `/companies/${encodeURIComponent(companyId)}/dataflows`, { body }),
-  putDataflow: (id, body) => request("PUT", `/dataflows/${encodeURIComponent(id)}`, { body }),
-  deleteDataflow: (id) => request("DELETE", `/dataflows/${encodeURIComponent(id)}`),
-  postDataflowReadSource: (body) => request("POST", "/dataflows/read-source", { body }),
-  postDataflowPreview: (body) => request("POST", "/dataflows/preview", { body }),
-  postDataflowAutoMap: (body) => request("POST", "/dataflows/auto-map", { body }),
-  postDataflowRun: (id) => request("POST", `/dataflows/${encodeURIComponent(id)}/run`),
-  getDataflowRuns: (id, query) =>
-    request("GET", `/dataflows/${encodeURIComponent(id)}/runs`, { query }),
-  getDataflowRun: (runId) => request("GET", `/dataflow-runs/${encodeURIComponent(runId)}`),
-  getDataflowRunErrors: (runId, query) =>
-    request("GET", `/dataflow-runs/${encodeURIComponent(runId)}/errors`, { query }),
+  /* Dataverse ETL (admin): Dataverse → dbo.DataTbl */
+  getEtlConnectionDefaults: () => request("GET", "/etl/dataverse/connection-defaults"),
+  testEtlConnection: (body) => request("POST", "/etl/dataverse/connections/test", { body }),
+  listEtlConnections: () => request("GET", "/etl/dataverse/connections"),
+  createEtlConnection: (body) => request("POST", "/etl/dataverse/connections", { body }),
+  updateEtlConnection: (id, body) =>
+    request("PUT", `/etl/dataverse/connections/${encodeURIComponent(id)}`, { body }),
+  deleteEtlConnection: (id) => request("DELETE", `/etl/dataverse/connections/${encodeURIComponent(id)}`),
+  listEtlTables: (connectionId) =>
+    request("GET", `/etl/dataverse/connections/${encodeURIComponent(connectionId)}/tables`),
+  getEtlTableColumns: (connectionId, tableLogicalName) =>
+    request(
+      "GET",
+      `/etl/dataverse/connections/${encodeURIComponent(connectionId)}/tables/${encodeURIComponent(tableLogicalName)}/columns`
+    ),
+  previewEtlTable: (connectionId, tableLogicalName, query) =>
+    request(
+      "GET",
+      `/etl/dataverse/connections/${encodeURIComponent(connectionId)}/tables/${encodeURIComponent(tableLogicalName)}/preview`,
+      { query }
+    ),
+  getEtlDataTblColumns: () => request("GET", "/etl/sql/datatbl/columns"),
+  listEtlMappings: () => request("GET", "/etl/dataverse/mappings"),
+  getEtlMapping: (id) => request("GET", `/etl/dataverse/mappings/${encodeURIComponent(id)}`),
+  createEtlMapping: (body) => request("POST", "/etl/dataverse/mappings", { body }),
+  updateEtlMapping: (id, body) =>
+    request("PUT", `/etl/dataverse/mappings/${encodeURIComponent(id)}`, { body }),
+  deleteEtlMapping: (id) => request("DELETE", `/etl/dataverse/mappings/${encodeURIComponent(id)}`),
+  listEtlMappingLogs: (mappingId) =>
+    request("GET", `/etl/dataverse/mappings/${encodeURIComponent(mappingId)}/logs`),
+  etlAutoMap: (body) => request("POST", "/etl/dataverse/mappings/auto-map", { body }),
+  etlImportPreview: (body) => request("POST", "/etl/dataverse/import/preview", { body }),
+  runEtlImport: (body) => request("POST", "/etl/dataverse/import/run", { body }),
+  listEtlImportLogs: () => request("GET", "/etl/dataverse/import/logs"),
+  getEtlImportLog: (id) => request("GET", `/etl/dataverse/import/logs/${encodeURIComponent(id)}`),
+
   getSqlTables: () => request("GET", "/sql/tables"),
   getSqlTableSchema: (tableName) =>
     request("GET", `/sql/tables/${encodeURIComponent(tableName)}/schema`)

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { createPortal } from "react-dom";
 import { Check, ChevronDown, ChevronLeft, ChevronRight, Plus, RefreshCw, Scale, Trash2 } from "lucide-react";
 import { api } from "../api/apiClient";
+import { dateDueTextClass } from "../lib/followUpDateStyle.js";
 import { getActiveMsAccount } from "../microsoft/msGraphMail";
 
 const MONTHS = [
@@ -31,6 +32,14 @@ function monthOrd(y, m) {
 }
 
 /** FROM/TO stored on case; single month when end is null or same as start. */
+/** Case note stored on the case row belongs with the first (oldest) status entry. */
+function noteForStatusEntry(status, index, statuses, initialNote) {
+  if (status.note) return status.note;
+  const isOldest = index === statuses.length - 1;
+  if (isOldest && initialNote) return initialNote;
+  return null;
+}
+
 function formatLegalCasePeriod(c) {
   const y1 = c.openYear;
   const m1 = c.openMonth;
@@ -333,12 +342,57 @@ export default function UnitLegalCasesPanel({ rowQuery, onUnitsRefresh }) {
   }, [cases, caseFilter]);
 
   const newCaseStatusOptions = useMemo(() => {
-    const set = new Set();
+    const seen = new Set();
+    const out = [];
     for (const o of statusOptions) {
-      if (o.status) set.add(String(o.status).trim());
+      const status = String(o.status ?? o).trim();
+      if (status && !seen.has(status)) {
+        seen.add(status);
+        out.push(status);
+      }
     }
-    return [...set].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+    return out;
   }, [statusOptions]);
+
+  const [newFieldErrors, setNewFieldErrors] = useState({
+    followUp: false,
+    legalStatus: false,
+    period: false,
+    noStatuses: false
+  });
+
+  function clearNewFieldError(key) {
+    setNewFieldErrors((prev) => (prev[key] ? { ...prev, [key]: false } : prev));
+  }
+
+  function newFieldClass(...keys) {
+    const invalid = keys.some((k) => newFieldErrors[k]);
+    return `ud-cases__field${invalid ? " ud-cases__field--invalid" : ""}`;
+  }
+
+  function attemptCreateCase() {
+    const followUpEmpty = !String(newFollowUp || "").trim();
+    const statusEmpty = !String(newCaseStatus || "").trim();
+    const periodBad = !(newFromYear && newFromMonth && newToYear && newToMonth);
+    const noStatuses = newCaseStatusOptions.length === 0;
+
+    if (followUpEmpty || statusEmpty || periodBad || noStatuses) {
+      setNewFieldErrors({
+        followUp: followUpEmpty,
+        legalStatus: statusEmpty || noStatuses,
+        period: periodBad,
+        noStatuses
+      });
+      if (noStatuses) {
+        setErr("No legal statuses configured for this property.");
+      } else {
+        setErr("");
+      }
+      return;
+    }
+    setNewFieldErrors({ followUp: false, legalStatus: false, period: false, noStatuses: false });
+    void createCase();
+  }
 
   const loadAll = useCallback(async () => {
     if (!rowQuery?.property) return;
@@ -412,6 +466,7 @@ export default function UnitLegalCasesPanel({ rowQuery, onUnitsRefresh }) {
     setNewFollowUp("");
     setNewCaseStatus("");
     setMonthRangePickerOpen(false);
+    setNewFieldErrors({ followUp: false, legalStatus: false, period: false, noStatuses: false });
   }
 
   async function createCase() {
@@ -428,6 +483,13 @@ export default function UnitLegalCasesPanel({ rowQuery, onUnitsRefresh }) {
       setErr("“To” must be the same month or later than “From”.");
       return;
     }
+    if (!String(newFollowUp || "").trim()) return;
+    const statusPick = String(newCaseStatus || "").trim();
+    if (!statusPick) return;
+    if (newCaseStatusOptions.length === 0) {
+      setErr("No legal statuses configured for this property.");
+      return;
+    }
     setCreating(true);
     setErr("");
     try {
@@ -437,7 +499,6 @@ export default function UnitLegalCasesPanel({ rowQuery, onUnitsRefresh }) {
         ...rowQuery,
         openYear: fy,
         openMonth: fm,
-        initialNote: newNote || null,
         followUpAt: fromDateInputValue(newFollowUp),
         ...(createdByName ? { createdByName } : {})
       };
@@ -447,11 +508,10 @@ export default function UnitLegalCasesPanel({ rowQuery, onUnitsRefresh }) {
       }
       const created = await api.postDashboardLegalCase(body);
       const caseId = created?.id ?? created?.caseId;
-      const statusPick = String(newCaseStatus || "").trim();
-      if (caseId && statusPick) {
+      if (caseId) {
         await api.postDashboardLegalCaseStatus(caseId, {
           status: statusPick,
-          note: null,
+          note: newNote || null,
           ...(createdByName ? { createdByName } : {})
         });
       }
@@ -546,13 +606,18 @@ export default function UnitLegalCasesPanel({ rowQuery, onUnitsRefresh }) {
   /** Merge case's latest-saved status with property options so a missing or legacy status
    *  still shows in the dropdown when the admin reopens the picker. */
   function optionsForCase(c) {
-    const set = new Set();
+    const seen = new Set();
+    const out = [];
     for (const o of statusOptions) {
-      if (o.status) set.add(String(o.status).trim());
+      const status = String(o.status ?? o).trim();
+      if (status && !seen.has(status)) {
+        seen.add(status);
+        out.push(status);
+      }
     }
     const latest = String(c?.latestStatus ?? "").trim();
-    if (latest) set.add(latest);
-    return [...set].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+    if (latest && !seen.has(latest)) out.push(latest);
+    return out;
   }
 
   return (
@@ -582,16 +647,21 @@ export default function UnitLegalCasesPanel({ rowQuery, onUnitsRefresh }) {
       {newOpen ? (
         <div className="ud-cases__new-form">
           <div className="ud-cases__new-row ud-cases__new-row--2">
-            <div className="ud-cases__field ud-cases__period-wrap">
+            <div
+              className={`${newFieldClass("period")} ud-cases__period-wrap${newFieldErrors.period ? " ud-cases__period-wrap--invalid" : ""}`}
+            >
               <span>From – To</span>
               <button
                 ref={rangeTriggerRef}
                 type="button"
-                className="ud-cases__range-trigger"
+                className={`ud-cases__range-trigger${newFieldErrors.period ? " ud-cases__range-trigger--invalid" : ""}`}
                 disabled={creating}
                 aria-expanded={monthRangePickerOpen}
                 aria-haspopup="dialog"
-                onClick={() => setMonthRangePickerOpen((o) => !o)}
+                onClick={() => {
+                  setMonthRangePickerOpen((o) => !o);
+                  clearNewFieldError("period");
+                }}
               >
                 <span className="ud-cases__range-trigger-text">
                   {formatRangeSummary(newFromYear, newFromMonth, newToYear, newToMonth)}
@@ -612,27 +682,40 @@ export default function UnitLegalCasesPanel({ rowQuery, onUnitsRefresh }) {
                   setNewFromMonth(fm);
                   setNewToYear(ty);
                   setNewToMonth(tm);
+                  clearNewFieldError("period");
                 }}
               />
             </div>
-            <label className="ud-cases__field">
+            <label className={newFieldClass("followUp")}>
               <span>Follow-up date</span>
               <input
                 type="date"
+                className={dateDueTextClass(newFollowUp)}
                 value={newFollowUp}
-                onChange={(e) => setNewFollowUp(e.target.value)}
+                required
+                aria-invalid={newFieldErrors.followUp || undefined}
+                onChange={(e) => {
+                  setNewFollowUp(e.target.value);
+                  clearNewFieldError("followUp");
+                }}
               />
             </label>
           </div>
-          <label className="ud-cases__field ud-cases__field--wide">
+          <label className={`${newFieldClass("legalStatus", "noStatuses")} ud-cases__field--wide`}>
             <span>Legal status</span>
             <select
               value={newCaseStatus}
-              onChange={(e) => setNewCaseStatus(e.target.value)}
+              required
+              aria-invalid={newFieldErrors.legalStatus || undefined}
+              onChange={(e) => {
+                setNewCaseStatus(e.target.value);
+                clearNewFieldError("legalStatus");
+                clearNewFieldError("noStatuses");
+              }}
               disabled={creating || newCaseStatusOptions.length === 0}
             >
               <option value="">
-                {newCaseStatusOptions.length === 0 ? "No statuses configured for this property" : "— Optional —"}
+                {newCaseStatusOptions.length === 0 ? "No statuses configured for this property" : "— Select —"}
               </option>
               {newCaseStatusOptions.map((s) => (
                 <option key={s} value={s}>
@@ -658,14 +741,8 @@ export default function UnitLegalCasesPanel({ rowQuery, onUnitsRefresh }) {
             <button
               type="button"
               className="btn btn-primary"
-              disabled={
-                creating ||
-                !newFromYear ||
-                !newFromMonth ||
-                !newToYear ||
-                !newToMonth
-              }
-              onClick={() => void createCase()}
+              disabled={creating}
+              onClick={attemptCreateCase}
             >
               {creating ? "Adding…" : "Add case"}
             </button>
@@ -751,7 +828,10 @@ export default function UnitLegalCasesPanel({ rowQuery, onUnitsRefresh }) {
                     </span>
                     <span className="ud-cases__head-meta">
                       {c.followUpAt ? (
-                        <span className="ud-cases__followup" title="Follow-up">
+                        <span
+                          className={`ud-cases__followup ${dateDueTextClass(c.followUpAt)}`}
+                          title="Follow-up"
+                        >
                           ⏰ {formatDate(c.followUpAt)}
                         </span>
                       ) : null}
@@ -765,17 +845,17 @@ export default function UnitLegalCasesPanel({ rowQuery, onUnitsRefresh }) {
 
                   {expanded ? (
                     <div className="ud-cases__body">
-                      {c.initialNote ? (
-                        <p className="ud-cases__initial-note">{c.initialNote}</p>
-                      ) : null}
-
                       {!c.isClosed ? (
                         <div className="ud-cases__followup-edit">
                           <label className="ud-cases__field ud-cases__field--wide">
                             <span>Follow-up date</span>
                             <input
                               type="date"
-                              className="ud-cases__followup-date-input"
+                              className={`ud-cases__followup-date-input ${dateDueTextClass(
+                                followUpDraftByCase[c.id] !== undefined
+                                  ? followUpDraftByCase[c.id]
+                                  : c.followUpAt
+                              )}`}
                               value={
                                 followUpDraftByCase[c.id] !== undefined
                                   ? followUpDraftByCase[c.id]
@@ -824,18 +904,21 @@ export default function UnitLegalCasesPanel({ rowQuery, onUnitsRefresh }) {
                         <p className="text-muted">Loading…</p>
                       ) : statuses.length === 0 ? null : (
                         <ul className="ud-cases__history">
-                          {statuses.map((s) => (
+                          {statuses.map((s, idx) => {
+                            const displayNote = noteForStatusEntry(s, idx, statuses, c.initialNote);
+                            return (
                             <li key={s.id} className="ud-cases__history-item">
                               <div className="ud-cases__history-top">
                                 <strong>{s.status}</strong>
                                 <time className="text-muted">{formatDateTime(s.changedAt)}</time>
                               </div>
-                              {s.note ? <p className="ud-cases__history-note">{s.note}</p> : null}
+                              {displayNote ? <p className="ud-cases__history-note">{displayNote}</p> : null}
                               {s.createdByName ? (
                                 <span className="ud-cases__history-author text-muted">{s.createdByName}</span>
                               ) : null}
                             </li>
-                          ))}
+                            );
+                          })}
                         </ul>
                       )}
 

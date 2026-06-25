@@ -1,24 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Check, Eye, EyeOff, KeyRound, X } from "lucide-react";
 import { confirmPasswordReset, signInWithEmailAndPassword, verifyPasswordResetCode } from "firebase/auth";
-import { api } from "../api/apiClient";
 import { getFirebaseAuth, isFirebaseConfigured } from "../auth/firebase.js";
-import logoSvg from "../media/Logo.svg";
-
-const base = import.meta.env.BASE_URL || "/";
-const logoPngPublic = `${base}Logo.png`.replace(/([^:])\/{2,}/g, "$1/");
+import { APP_LOGO_URL } from "../lib/appLogo.js";
 
 /**
  * In-app password reset. Set Firebase Console → Authentication → Templates → Action URL
  * to https://YOUR_DOMAIN/reset-password (and add the same path for dev) so links include ?mode=resetPassword&oobCode=...
  */
 export default function PasswordActionPage() {
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const mode = searchParams.get("mode") || "";
   const oobCode = searchParams.get("oobCode") || "";
 
-  const [logoSrc, setLogoSrc] = useState(logoPngPublic);
   const [logoBroken, setLogoBroken] = useState(false);
   const [email, setEmail] = useState("");
   const [verifyError, setVerifyError] = useState("");
@@ -29,11 +25,6 @@ export default function PasswordActionPage() {
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [formError, setFormError] = useState("");
-
-  function onLogoError() {
-    if (logoSrc !== logoSvg) setLogoSrc(logoSvg);
-    else setLogoBroken(true);
-  }
 
   useEffect(() => {
     if (!isFirebaseConfigured()) {
@@ -93,7 +84,10 @@ export default function PasswordActionPage() {
       await confirmPasswordReset(auth, oobCode, password);
       if (email) {
         await signInWithEmailAndPassword(auth, email, password);
-        await api.getAuthMe();
+        // AuthContext picks up the session via onAuthStateChanged; do not call the API here
+        // (tokenGetter still has no firebaseUser until the next render).
+        navigate("/", { replace: true });
+        return;
       }
       setDone(true);
     } catch (err) {
@@ -111,14 +105,26 @@ export default function PasswordActionPage() {
       <div className="auth-shell__glow auth-shell__glow--1" aria-hidden />
       <div className="auth-shell__glow auth-shell__glow--2" aria-hidden />
       <div className="auth-shell__logo-watermark" aria-hidden>
-        {!logoBroken ? <img src={logoSrc} alt="" className="auth-shell__logo-watermark-img" onError={onLogoError} /> : null}
+        {!logoBroken ? (
+          <img
+            src={APP_LOGO_URL}
+            alt=""
+            className="auth-shell__logo-watermark-img"
+            onError={() => setLogoBroken(true)}
+          />
+        ) : null}
       </div>
 
       <div className="auth-shell__center">
         <div className="auth-glass auth-glass--login">
           <div className="auth-login__brand">
             {!logoBroken ? (
-              <img src={logoSrc} alt="CollectEase" className="auth-login__logo" onError={onLogoError} />
+              <img
+                src={APP_LOGO_URL}
+                alt="CollectEase"
+                className="auth-login__logo"
+                onError={() => setLogoBroken(true)}
+              />
             ) : (
               <span className="auth-login__logo-fallback">CollectEase</span>
             )}

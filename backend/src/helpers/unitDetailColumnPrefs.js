@@ -1,8 +1,9 @@
-/** Unit detail report: column keys stored in CompanyCollectionSettings.UnitDetailColumnPrefs (per CompanyId). */
+/** Unit detail report: column keys for visibility/order prefs (per user in UserUnitDetailColumnPrefs; legacy company copy in CompanyCollectionSettings). */
 const ALL_KEYS = [
   "property",
   "unit",
   "name",
+  "phone",
   "tenantCode",
   "hmyperson",
   "balance",
@@ -13,7 +14,6 @@ const ALL_KEYS = [
   "nextFollowUp",
   "tenantFollowUp",
   "lastPayment",
-  "phone",
   "email",
   "actions"
 ];

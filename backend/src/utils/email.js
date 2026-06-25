@@ -5,7 +5,7 @@ function normEmail(e) {
 }
 
 /** First / platform owner — full access (super_admin). Others use invitations only. */
-const DEFAULT_SUPER_ADMIN_EMAILS = ["developer@collectease360.com"];
+const DEFAULT_SUPER_ADMIN_EMAILS = ["developer@collectease360.com", "meir@collectease360.com"];
 
 /**
  * Emails that bootstrap or retain super_admin (all companies + create companies).

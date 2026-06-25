@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Wallet, AlertTriangle, Users } from "lucide-react";
 import { getActiveCompanyId } from "../config/company.js";
@@ -5,7 +6,7 @@ import { getActiveCompanyId } from "../config/company.js";
 /**
  * @param {object} [slice]
  * @param {"lt1"|"ge1"} [slice.collection]
- * @param {"missingFollowUp"|"pastDueFollowUp"|"dueTodayFollowUp"|"requiresLegal"|"removeLegal"} [slice.alert]
+ * @param {"missingTenantFollowUp"|"pastDueTenantFollowUp"|"pastDueFollowUp"|"dueTodayFollowUp"|"requiresLegal"|"removeLegal"} [slice.alert]
  * @param {"zeroBalance"|"lessThanOneMonth"|"oneToUnderThreeMonths"|"threePlusMonths"|"inLegal"} [slice.delinq]
  * @param {boolean} [slice.occupied]
  */
@@ -19,6 +20,12 @@ function buildPropertyUrl(region, propertyName, slice = {}) {
   return `/property/${encodeURIComponent(propertyName)}?${q.toString()}`;
 }
 
+function formatCollectionPercent(percent) {
+  const n = Number(percent);
+  if (!Number.isFinite(n)) return "0";
+  return String(Math.round(n));
+}
+
 function CollectionSplitCell({ percent, count, variant, onNavigate }) {
   const cls = variant === "lt1" ? "collection-split collection-split--lt1" : "collection-split collection-split--ge1";
   return (
@@ -30,9 +37,19 @@ function CollectionSplitCell({ percent, count, variant, onNavigate }) {
         onNavigate();
       }}
     >
-      <span className="collection-split-pct">{percent}%</span>
+      <span className="collection-split-pct">{formatCollectionPercent(percent)}%</span>
       <span className="collection-split-count">{count}</span>
     </button>
+  );
+}
+
+function StackedAlertHeader({ subject, middle, label }) {
+  return (
+    <span className="th-alerts-sub-label">
+      <span className="th-alerts-sub-label__subject">{subject}</span>
+      {middle ? <span className="th-alerts-sub-label__middle">{middle}</span> : null}
+      <span className="th-alerts-sub-label__detail">{label}</span>
+    </span>
   );
 }
 
@@ -55,25 +72,69 @@ function DashboardCellButton({ children, onNavigate, title, align = "center", cl
 
 export default function PortfolioSummaryCard({ region, portfolio }) {
   const navigate = useNavigate();
+  const cardRef = useRef(null);
+  const headRef = useRef(null);
+  const theadRef = useRef(null);
+
+  useEffect(() => {
+    const card = cardRef.current;
+    const head = headRef.current;
+    const thead = theadRef.current;
+    if (!card || !head || !thead) return;
+
+    const syncStickyOffsets = () => {
+      const headH = Math.ceil(head.getBoundingClientRect().height);
+      card.style.setProperty("--portfolio-card-head-h", `${headH}px`);
+    };
+
+    syncStickyOffsets();
+    const ro = new ResizeObserver(syncStickyOffsets);
+    ro.observe(head);
+    ro.observe(thead);
+    window.addEventListener("resize", syncStickyOffsets);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", syncStickyOffsets);
+    };
+  }, [portfolio.name, portfolio.properties.length]);
 
   function go(propertyName, slice) {
     navigate(buildPropertyUrl(region, propertyName, slice));
   }
 
   return (
-    <article className="card">
-      <div className="card-header">
+    <article ref={cardRef} className="card portfolio-summary-card">
+      <div ref={headRef} className="card-header portfolio-summary-card__head">
         <h2 className="card-title">{portfolio.name}</h2>
         <span className="text-muted" style={{ fontSize: "0.85rem" }}>
           {portfolio.properties.length} propert{portfolio.properties.length === 1 ? "y" : "ies"}
         </span>
       </div>
       <div className="card-body">
-        <div className="table-wrap table-wrap--report">
+        <div className="table-wrap table-wrap--report table-wrap--dashboard-portfolio">
           <table className="data-table data-table-dashboard">
-            <thead>
+            <colgroup>
+              <col className="dash-col-property" />
+              <col className="dash-col-occupied" />
+              <col className="dash-col-metric" />
+              <col className="dash-col-metric" />
+              <col className="dash-col-metric" />
+              <col className="dash-col-metric" />
+              <col className="dash-col-metric" />
+              <col className="dash-col-metric" />
+              <col className="dash-col-metric" />
+              <col className="dash-col-metric" />
+              <col className="dash-col-metric" />
+              <col className="dash-col-metric" />
+              <col className="dash-col-metric" />
+              <col className="dash-col-metric" />
+              <col className="dash-col-metric" />
+            </colgroup>
+            <thead ref={theadRef} className="dashboard-portfolio-thead">
               <tr>
-                <th rowSpan={2}>Property</th>
+                <th rowSpan={2} className="th-dashboard-property">
+                  Property
+                </th>
                 <th rowSpan={2} className="th-occupied-units">
                   Occupied units
                 </th>
@@ -82,7 +143,7 @@ export default function PortfolioSummaryCard({ region, portfolio }) {
                     <Wallet size={16} /> Collection
                   </span>
                 </th>
-                <th colSpan={5} className="th-alerts-group">
+                <th colSpan={6} className="th-alerts-group">
                   <span style={{ display: "inline-flex", alignItems: "center", gap: 6, justifyContent: "center" }}>
                     <AlertTriangle size={16} /> Alerts
                   </span>
@@ -94,18 +155,33 @@ export default function PortfolioSummaryCard({ region, portfolio }) {
                 </th>
               </tr>
               <tr>
-                <th className="th-collection-sub th-collection-sub--lt1">Less than 1 month</th>
-                <th className="th-collection-sub th-collection-sub--ge1">1 month or more</th>
-                <th className="th-alerts-sub">Missing legal follow up</th>
-                <th className="th-alerts-sub">Past due legal follow up</th>
-                <th className="th-alerts-sub">Due today legal follow up</th>
-                <th className="th-alerts-sub">Requires legal</th>
-                <th className="th-alerts-sub">Remove legal</th>
+                <th className="th-collection-sub th-collection-sub--lt1">Under 1 Month</th>
+                <th className="th-collection-sub th-collection-sub--ge1">1 Month +</th>
+                <th
+                  className="th-alerts-sub"
+                  title="Rent &gt; 0, no tenant follow-up date, and balance meets Follow Up Alerts settings"
+                >
+                  <StackedAlertHeader subject="Tenant" middle="Missing" label="Follow-up" />
+                </th>
+                <th
+                  className="th-alerts-sub"
+                  title="Rent &gt; 0 and tenant follow-up date is before today"
+                >
+                  <StackedAlertHeader subject="Tenant" label="Past Due Follow-up" />
+                </th>
+                <th className="th-alerts-sub">
+                  <StackedAlertHeader subject="Legal" label="Past Due Follow-up" />
+                </th>
+                <th className="th-alerts-sub">
+                  <StackedAlertHeader subject="Legal" label="Due Today Follow-up" />
+                </th>
+                <th className="th-alerts-sub">Requires Legal</th>
+                <th className="th-alerts-sub">Close Legal</th>
                 <th className="th-delinquent-sub" title="Rent &gt; 0 and balance ≤ 0">
                   Zero Balance
                 </th>
-                <th className="th-delinquent-sub" title="Rent &gt; 0 and 0 &lt; Balance &lt; Rent">
-                  Less Than a Month
+                <th className="th-delinquent-sub" title="Rent is 0, or rent &gt; 0 and 0 &lt; balance &lt; rent">
+                  Under 1 Month
                 </th>
                 <th
                   className="th-delinquent-sub"
@@ -124,7 +200,7 @@ export default function PortfolioSummaryCard({ region, portfolio }) {
             <tbody>
               {portfolio.properties.length === 0 && (
                 <tr>
-                  <td colSpan={14}>
+                  <td colSpan={15}>
                     <div className="empty-state">No properties in this portfolio.</div>
                   </td>
                 </tr>
@@ -133,7 +209,8 @@ export default function PortfolioSummaryCard({ region, portfolio }) {
                 const lt1 = p.collectionLessThanOneMonth ?? { count: 0, percent: 0 };
                 const ge1 = p.collectionOneMonthOrMore ?? { count: 0, percent: 0 };
                 const al = p.alerts ?? {};
-                const missingFu = al.missingFollowUp ?? 0;
+                const missingTenantFu = al.missingTenantFollowUp ?? 0;
+                const pastDueTenant = al.pastDueTenantFollowUp ?? 0;
                 const pastDue = al.pastDueFollowUp ?? 0;
                 const dueToday = al.dueTodayFollowUp ?? 0;
                 const reqLegal = al.requiresLegal ?? 0;
@@ -154,7 +231,7 @@ export default function PortfolioSummaryCard({ region, portfolio }) {
                     <td className="td-occupied-units">
                       <DashboardCellButton
                         className="tabular-nums"
-                        title="Occupied (Rent &gt; 0)"
+                        title="Occupied units"
                         onNavigate={() => go(p.property, { occupied: true })}
                       >
                         {p.occupiedUnits ?? 0}
@@ -179,16 +256,33 @@ export default function PortfolioSummaryCard({ region, portfolio }) {
                     <td className="td-alert-count">
                       <DashboardCellButton
                         className="tabular-nums"
-                        title="Missing legal follow up"
-                        onNavigate={() => go(p.property, { alert: "missingFollowUp" })}
+                        title="Tenant Missing Follow-up"
+                        onNavigate={() => go(p.property, { alert: "missingTenantFollowUp" })}
                       >
-                        {missingFu > 0 ? <span className="alert-count-hot">{missingFu}</span> : <span>0</span>}
+                        {missingTenantFu > 0 ? (
+                          <span className="alert-count-hot">{missingTenantFu}</span>
+                        ) : (
+                          <span>0</span>
+                        )}
                       </DashboardCellButton>
                     </td>
                     <td className="td-alert-count">
                       <DashboardCellButton
                         className="tabular-nums"
-                        title="Past due legal follow up"
+                        title="Tenant Past Due Follow-up"
+                        onNavigate={() => go(p.property, { alert: "pastDueTenantFollowUp" })}
+                      >
+                        {pastDueTenant > 0 ? (
+                          <span className="alert-count-hot">{pastDueTenant}</span>
+                        ) : (
+                          <span>0</span>
+                        )}
+                      </DashboardCellButton>
+                    </td>
+                    <td className="td-alert-count">
+                      <DashboardCellButton
+                        className="tabular-nums"
+                        title="Legal Past Due Follow-up"
                         onNavigate={() => go(p.property, { alert: "pastDueFollowUp" })}
                       >
                         {pastDue > 0 ? <span className="alert-count-hot">{pastDue}</span> : <span>0</span>}
@@ -197,7 +291,7 @@ export default function PortfolioSummaryCard({ region, portfolio }) {
                     <td className="td-alert-count">
                       <DashboardCellButton
                         className="tabular-nums"
-                        title="Due today legal follow up"
+                        title="Legal Due Today Follow-up"
                         onNavigate={() => go(p.property, { alert: "dueTodayFollowUp" })}
                       >
                         {dueToday > 0 ? <span className="alert-count-hot">{dueToday}</span> : <span>0</span>}
@@ -206,7 +300,7 @@ export default function PortfolioSummaryCard({ region, portfolio }) {
                     <td className="td-alert-count">
                       <DashboardCellButton
                         className="tabular-nums"
-                        title="Requires legal"
+                        title="Requires Legal"
                         onNavigate={() => go(p.property, { alert: "requiresLegal" })}
                       >
                         {reqLegal > 0 ? <span className="alert-count-hot">{reqLegal}</span> : <span>0</span>}
@@ -215,7 +309,7 @@ export default function PortfolioSummaryCard({ region, portfolio }) {
                     <td className="td-alert-count">
                       <DashboardCellButton
                         className="tabular-nums"
-                        title="Remove legal"
+                        title="Close Legal"
                         onNavigate={() => go(p.property, { alert: "removeLegal" })}
                       >
                         {removeLegal > 0 ? <span className="alert-count-hot">{removeLegal}</span> : <span>0</span>}
@@ -233,7 +327,7 @@ export default function PortfolioSummaryCard({ region, portfolio }) {
                     <td className="td-delinquent-count">
                       <DashboardCellButton
                         className="tabular-nums"
-                        title="Less than a month (delinquent)"
+                        title="Under 1 Month (delinquent)"
                         onNavigate={() => go(p.property, { delinq: "lessThanOneMonth" })}
                       >
                         {dqlt > 0 ? <span className="delinquent-count-warn">{dqlt}</span> : dqlt}

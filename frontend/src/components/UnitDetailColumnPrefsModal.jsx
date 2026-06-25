@@ -51,7 +51,7 @@ export default function UnitDetailColumnPrefsModal({ open, companyId, initialPre
     setSaving(true);
     setError("");
     try {
-      const data = await api.putAdminUnitDetailColumnPrefs({
+      const data = await api.putDashboardUnitDetailColumnPrefs({
         columnOrder: order,
         hidden: [...hidden]
       });
@@ -88,8 +88,8 @@ export default function UnitDetailColumnPrefsModal({ open, companyId, initialPre
           </button>
         </div>
         <p className="unit-detail-prefs-modal-desc">
-          Visibility and column order are stored per company. Company ID <strong>{companyId ?? "—"}</strong>. Actions
-          always stay last and stay visible.
+          Column visibility and order are saved for your user account and apply whenever you open Property details.
+          Actions always stay last and stay visible.
         </p>
         {error ? (
           <div className="unit-detail-prefs-modal-error" role="alert">

@@ -3,10 +3,9 @@ import { useNavigate } from "react-router-dom";
 import { Eye, EyeOff, Shield } from "lucide-react";
 import { signInWithEmailAndPassword, sendPasswordResetEmail } from "firebase/auth";
 import { getFirebaseAuth, isFirebaseConfigured } from "../auth/firebase.js";
-import logoSvg from "../media/Logo.svg";
+import { APP_LOGO_URL } from "../lib/appLogo.js";
 
 const base = import.meta.env.BASE_URL || "/";
-const logoPngPublic = `${base}Logo.png`.replace(/([^:])\/{2,}/g, "$1/");
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -16,15 +15,8 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [resetMsg, setResetMsg] = useState("");
-  /** Try `public/Logo.png` first, then bundled SVG. */
-  const [logoSrc, setLogoSrc] = useState(logoPngPublic);
   const [logoBroken, setLogoBroken] = useState(false);
   const [requestOpen, setRequestOpen] = useState(false);
-
-  function onLogoError() {
-    if (logoSrc !== logoSvg) setLogoSrc(logoSvg);
-    else setLogoBroken(true);
-  }
 
   async function onSubmit(e) {
     e.preventDefault();
@@ -90,7 +82,12 @@ export default function LoginPage() {
       <div className="auth-shell__glow auth-shell__glow--2" aria-hidden />
       <div className="auth-shell__logo-watermark" aria-hidden>
         {!logoBroken ? (
-          <img src={logoSrc} alt="" className="auth-shell__logo-watermark-img" onError={onLogoError} />
+          <img
+            src={APP_LOGO_URL}
+            alt=""
+            className="auth-shell__logo-watermark-img"
+            onError={() => setLogoBroken(true)}
+          />
         ) : null}
       </div>
 
@@ -98,7 +95,12 @@ export default function LoginPage() {
         <div className="auth-glass auth-glass--login">
           <div className="auth-login__brand">
             {!logoBroken ? (
-              <img src={logoSrc} alt="CollectEase" className="auth-login__logo" onError={onLogoError} />
+              <img
+                src={APP_LOGO_URL}
+                alt="CollectEase"
+                className="auth-login__logo"
+                onError={() => setLogoBroken(true)}
+              />
             ) : (
               <span className="auth-login__logo-fallback">CollectEase</span>
             )}

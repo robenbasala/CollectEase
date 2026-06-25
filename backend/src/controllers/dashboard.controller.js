@@ -7,6 +7,10 @@ const {
   propertiesTableScopeSql,
   memberCanAccessProperty
 } = require("../helpers/companyContext");
+const {
+  normalizeUnitDetailColumnPrefs,
+  parsePrefsJson
+} = require("../helpers/unitDetailColumnPrefs");
 
 function q(name) {
   return `[${col[name]}]`;
@@ -31,6 +35,13 @@ const HP = q("hmyperson");
 const DT_BAL = `ISNULL(TRY_CAST(dt.${B} AS DECIMAL(18,4)), 0)`;
 const DT_RENT = `ISNULL(TRY_CAST(dt.${RT} AS DECIMAL(18,4)), 0)`;
 
+/** Collection / delinquent "Under 1 Month": zero rent, or positive rent with balance below one month. */
+const COLLECTION_LT1_PRED = `${DT_RENT} <= 0 OR (${DT_RENT} > 0 AND ${DT_BAL} < ${DT_RENT})`;
+const COLLECTION_LT1 = `(${COLLECTION_LT1_PRED})`;
+const COLLECTION_GE1 = `(${DT_RENT} > 0 AND ${DT_BAL} >= ${DT_RENT})`;
+const DELINQ_LT1_PRED = `${DT_RENT} <= 0 OR (${DT_RENT} > 0 AND ${DT_BAL} > 0 AND ${DT_BAL} < ${DT_RENT})`;
+const DELINQ_LT1 = `(${DELINQ_LT1_PRED})`;
+
 function nextFollowUpToMillis(v) {
   if (v == null || v === "") return null;
   if (v instanceof Date) {
@@ -40,6 +51,12 @@ function nextFollowUpToMillis(v) {
   const d = new Date(v);
   const t = d.getTime();
   return Number.isNaN(t) ? null : t;
+}
+
+/** Share of total as percent with one decimal (avoids misleading 100% when count < total). */
+function percentOf(part, total) {
+  if (!total) return 0;
+  return Math.round((1000 * part) / total) / 10;
 }
 
 function pickNum(row, ...names) {
@@ -76,52 +93,116 @@ const MD_EXPR = `CASE
   )
 END`;
 
-/** NextFollowUp blank (Power Apps IsBlank) */
+/** NextFollowUp blank on DataTbl only (legacy) */
 const NF_BLANK = `(dt.${NF} IS NULL OR LTRIM(RTRIM(CAST(dt.${NF} AS NVARCHAR(400)))) = N'')`;
 
+/** TenantFollowUp has a saved date on DataTbl. */
+const TF_HAS_VALUE = `(dt.${TF} IS NOT NULL AND TRY_CONVERT(DATETIME2, dt.${TF}) IS NOT NULL)`;
+
+/** TenantFollowUp blank — no date stored on DataTbl. */
+const TF_BLANK = `NOT (${TF_HAS_VALUE})`;
+
+/** Join open legal cases for portfolio/unit alert aggregates (requires @companyId). */
+const LEGAL_CASE_JOINS = `
+    LEFT JOIN (
+      SELECT PropertyName, Unit, TenantName, MIN(FollowUpAt) AS MinLegalFollowUp
+      FROM dbo.UnitLegalCase
+      WHERE CompanyId = @companyId AND IsClosed = 0 AND FollowUpAt IS NOT NULL
+      GROUP BY PropertyName, Unit, TenantName
+    ) lc_fu ON LTRIM(RTRIM(CAST(lc_fu.PropertyName AS NVARCHAR(400)))) = LTRIM(RTRIM(CAST(dt.${PR} AS NVARCHAR(400))))
+      AND LTRIM(RTRIM(CAST(lc_fu.Unit AS NVARCHAR(400)))) = LTRIM(RTRIM(CAST(dt.${U} AS NVARCHAR(400))))
+      AND LTRIM(RTRIM(CAST(lc_fu.TenantName AS NVARCHAR(400)))) = LTRIM(RTRIM(CAST(dt.${N} AS NVARCHAR(400))))
+    LEFT JOIN (
+      SELECT PropertyName, Unit, TenantName, LatestStatus
+      FROM (
+        SELECT lc.PropertyName, lc.Unit, lc.TenantName, lcs.Status AS LatestStatus,
+          ROW_NUMBER() OVER (
+            PARTITION BY lc.PropertyName, lc.Unit, lc.TenantName
+            ORDER BY lc.CreatedAt DESC, lc.Id DESC
+          ) AS rn
+        FROM dbo.UnitLegalCase lc
+        OUTER APPLY (
+          SELECT TOP 1 Status FROM dbo.UnitLegalCaseStatus
+          WHERE CaseId = lc.Id ORDER BY ChangedAt DESC, Id DESC
+        ) lcs
+        WHERE lc.CompanyId = @companyId AND lc.IsClosed = 0
+      ) x WHERE x.rn = 1
+    ) lc_st ON LTRIM(RTRIM(CAST(lc_st.PropertyName AS NVARCHAR(400)))) = LTRIM(RTRIM(CAST(dt.${PR} AS NVARCHAR(400))))
+      AND LTRIM(RTRIM(CAST(lc_st.Unit AS NVARCHAR(400)))) = LTRIM(RTRIM(CAST(dt.${U} AS NVARCHAR(400))))
+      AND LTRIM(RTRIM(CAST(lc_st.TenantName AS NVARCHAR(400)))) = LTRIM(RTRIM(CAST(dt.${N} AS NVARCHAR(400))))`;
+
+/** Earliest of DataTbl NextFollowUp and open-case FollowUpAt (matches unit list overlay). */
+const EFFECTIVE_FOLLOWUP_DATE = `(
+  CASE
+    WHEN TRY_CONVERT(DATE, dt.${NF}) IS NULL THEN TRY_CONVERT(DATE, lc_fu.MinLegalFollowUp)
+    WHEN TRY_CONVERT(DATE, lc_fu.MinLegalFollowUp) IS NULL THEN TRY_CONVERT(DATE, dt.${NF})
+    WHEN TRY_CONVERT(DATE, dt.${NF}) <= TRY_CONVERT(DATE, lc_fu.MinLegalFollowUp)
+      THEN TRY_CONVERT(DATE, dt.${NF})
+    ELSE TRY_CONVERT(DATE, lc_fu.MinLegalFollowUp)
+  END
+)`;
+
+const EFFECTIVE_NF_BLANK = `(${EFFECTIVE_FOLLOWUP_DATE} IS NULL)`;
+
+/** Legal status for alerts: latest open case status when present, else DataTbl. */
+const EFFECTIVE_LS_EXPR = `CASE
+  WHEN lc_st.LatestStatus IS NOT NULL AND LTRIM(RTRIM(lc_st.LatestStatus)) <> N''
+  THEN LTRIM(RTRIM(lc_st.LatestStatus))
+  ELSE NULLIF(LTRIM(RTRIM(CAST(dt.${LS} AS NVARCHAR(400)))), N'')
+END`;
+
+/** Balance/rent thresholds from CompanyCollectionSettings — tenant follow-up required when met. */
+const TENANT_FOLLOWUP_THRESHOLD = `(
+  (
+    ISNULL(TRY_CAST(dt.${B} AS DECIMAL(18,4)), 0) > ISNULL(TRY_CAST(cs.FollowupAmount AS DECIMAL(18,4)), 0)
+    AND DAY(GETDATE()) > ISNULL(TRY_CAST(cs.FollowupDays AS INT), 9999)
+  )
+  OR (
+    ISNULL(TRY_CAST(dt.${B} AS DECIMAL(18,4)), 0)
+      >= ISNULL(TRY_CAST(dt.${RT} AS DECIMAL(18,4)), 0)
+         * ISNULL(TRY_CAST(cs.FollowupMonths AS DECIMAL(18,4)), 0)
+  )
+)`;
+
 /**
- * Missing follow up — same logic as Power Apps; thresholds from dbo.CompanyCollectionSettings (per CompanyId).
+ * Missing tenant follow-up — rent &gt; 0, balance &gt; 0, no TenantFollowUp date on DataTbl,
+ * and balance meets Follow Up Alerts thresholds (CompanyCollectionSettings).
  */
-const MISSING_FOLLOWUP_CASE = `CASE
+const MISSING_TENANT_FOLLOWUP_CASE = `CASE
   WHEN ISNULL(TRY_CAST(dt.${RT} AS DECIMAL(18,4)), 0) > 0
-    AND ${NF_BLANK}
-    AND (
-      (
-        ISNULL(TRY_CAST(dt.${B} AS DECIMAL(18,4)), 0) > ISNULL(TRY_CAST(cs.FollowupAmount AS DECIMAL(18,4)), 0)
-        AND DAY(GETDATE()) > ISNULL(TRY_CAST(cs.FollowupDays AS INT), 9999)
-      )
-      OR (
-        ISNULL(TRY_CAST(dt.${B} AS DECIMAL(18,4)), 0)
-          >= ISNULL(TRY_CAST(dt.${RT} AS DECIMAL(18,4)), 0)
-             * ISNULL(TRY_CAST(cs.FollowupMonths AS DECIMAL(18,4)), 0)
-      )
-    )
+    AND ${DT_BAL} > 0
+    AND ${TF_BLANK}
+    AND ${TENANT_FOLLOWUP_THRESHOLD}
   THEN 1 ELSE 0
 END`;
 
-/** Past due follow up — Power Apps: Rent>0, !IsBlank(NextFollowUp), NextFollowUp < Today() */
+/** Past due tenant follow-up — Rent>0, TenantFollowUp date before today. */
+const PAST_DUE_TENANT_FOLLOWUP_CASE = `CASE
+  WHEN ISNULL(TRY_CAST(dt.${RT} AS DECIMAL(18,4)), 0) > 0
+    AND ${TF_HAS_VALUE}
+    AND TRY_CONVERT(DATE, dt.${TF}) < CAST(GETDATE() AS DATE)
+  THEN 1 ELSE 0
+END`;
+
+/** Past due follow up — Rent>0, effective next follow-up before today. */
 const PAST_DUE_FOLLOWUP_CASE = `CASE
   WHEN ISNULL(TRY_CAST(dt.${RT} AS DECIMAL(18,4)), 0) > 0
-    AND NOT (${NF_BLANK})
-    AND TRY_CONVERT(DATE, dt.${NF}) IS NOT NULL
-    AND TRY_CONVERT(DATE, dt.${NF}) < CAST(GETDATE() AS DATE)
+    AND NOT (${EFFECTIVE_NF_BLANK})
+    AND ${EFFECTIVE_FOLLOWUP_DATE} < CAST(GETDATE() AS DATE)
   THEN 1 ELSE 0
 END`;
 
-/** Due today follow up — Power Apps: Rent>0, !IsBlank(NextFollowUp), NextFollowUp = Today() */
+/** Due today follow up — Rent>0, effective next follow-up is today. */
 const DUE_TODAY_FOLLOWUP_CASE = `CASE
   WHEN ISNULL(TRY_CAST(dt.${RT} AS DECIMAL(18,4)), 0) > 0
-    AND NOT (${NF_BLANK})
-    AND TRY_CONVERT(DATE, dt.${NF}) IS NOT NULL
-    AND TRY_CONVERT(DATE, dt.${NF}) = CAST(GETDATE() AS DATE)
+    AND NOT (${EFFECTIVE_NF_BLANK})
+    AND ${EFFECTIVE_FOLLOWUP_DATE} = CAST(GETDATE() AS DATE)
   THEN 1 ELSE 0
 END`;
 
-/** LegalStatus blank or exactly "Case Closed" (Power Apps IsBlank || = "Case Closed") */
+/** Effective legal status blank or "Case Closed" (eligible for requires-legal alert). */
 const LEGAL_STATUS_OPEN_FOR_ESCALATION = `(
-  dt.${LS} IS NULL
-  OR LTRIM(RTRIM(CAST(dt.${LS} AS NVARCHAR(400)))) = N''
-  OR LTRIM(RTRIM(CAST(dt.${LS} AS NVARCHAR(400)))) = N'Case Closed'
+  ${EFFECTIVE_LS_EXPR} IS NULL OR ${EFFECTIVE_LS_EXPR} = N'Case Closed'
 )`;
 
 /**
@@ -145,14 +226,12 @@ const REQUIRES_LEGAL_CASE = `CASE
   THEN 1 ELSE 0
 END`;
 
-/** Remove legal — Power Apps: Balance<=0, !IsBlank(LegalStatus), LegalStatus <> "Case Closed" */
-const LEGAL_STATUS_NOT_BLANK = `NOT (
-  dt.${LS} IS NULL OR LTRIM(RTRIM(CAST(dt.${LS} AS NVARCHAR(400)))) = N''
-)`;
+/** Remove legal — Balance<=0, effective legal status set and not Case Closed. */
+const LEGAL_STATUS_NOT_BLANK = `(${EFFECTIVE_LS_EXPR} IS NOT NULL AND ${EFFECTIVE_LS_EXPR} <> N'')`;
 const REMOVE_LEGAL_CASE = `CASE
   WHEN ISNULL(TRY_CAST(dt.${B} AS DECIMAL(18,4)), 0) <= 0
     AND ${LEGAL_STATUS_NOT_BLANK}
-    AND LTRIM(RTRIM(CAST(dt.${LS} AS NVARCHAR(400)))) <> N'Case Closed'
+    AND ${EFFECTIVE_LS_EXPR} <> N'Case Closed'
   THEN 1 ELSE 0
 END`;
 
@@ -164,7 +243,7 @@ END`;
 const DLQ_ZERO_BALANCE = `CASE WHEN ${DT_BAL} <= 0 THEN 1 ELSE 0 END`;
 
 const DLQ_LESS_THAN_ONE_MONTH = `CASE
-  WHEN ${DT_RENT} > 0 AND ${DT_BAL} > 0 AND ${DT_BAL} < ${DT_RENT}
+  WHEN ${DELINQ_LT1_PRED}
   THEN 1 ELSE 0 END`;
 
 const DLQ_ONE_TO_UNDER_THREE_MONTHS = `CASE
@@ -177,8 +256,130 @@ const DLQ_THREE_PLUS_MONTHS = `CASE
 
 const DLQ_IN_LEGAL = `CASE
   WHEN ${LEGAL_STATUS_NOT_BLANK}
+    AND ${EFFECTIVE_LS_EXPR} <> N'Case Closed'
+  THEN 1 ELSE 0 END`;
+
+/** Legacy alert SQL when legal-case tables are not migrated yet. */
+const LEGAL_STATUS_OPEN_LEGACY = `(
+  dt.${LS} IS NULL
+  OR LTRIM(RTRIM(CAST(dt.${LS} AS NVARCHAR(400)))) = N''
+  OR LTRIM(RTRIM(CAST(dt.${LS} AS NVARCHAR(400)))) = N'Case Closed'
+)`;
+
+const LEGAL_STATUS_NOT_BLANK_LEGACY = `NOT (
+  dt.${LS} IS NULL OR LTRIM(RTRIM(CAST(dt.${LS} AS NVARCHAR(400)))) = N''
+)`;
+
+const PAST_DUE_FOLLOWUP_LEGACY = `CASE
+  WHEN ISNULL(TRY_CAST(dt.${RT} AS DECIMAL(18,4)), 0) > 0
+    AND NOT (${NF_BLANK})
+    AND TRY_CONVERT(DATE, dt.${NF}) IS NOT NULL
+    AND TRY_CONVERT(DATE, dt.${NF}) < CAST(GETDATE() AS DATE)
+  THEN 1 ELSE 0
+END`;
+
+const DUE_TODAY_FOLLOWUP_LEGACY = `CASE
+  WHEN ISNULL(TRY_CAST(dt.${RT} AS DECIMAL(18,4)), 0) > 0
+    AND NOT (${NF_BLANK})
+    AND TRY_CONVERT(DATE, dt.${NF}) IS NOT NULL
+    AND TRY_CONVERT(DATE, dt.${NF}) = CAST(GETDATE() AS DATE)
+  THEN 1 ELSE 0
+END`;
+
+const REQUIRES_LEGAL_LEGACY = `CASE
+  WHEN ISNULL(TRY_CAST(dt.${RT} AS DECIMAL(18,4)), 0) > 0
+    AND (
+      (
+        ISNULL(TRY_CAST(dt.${B} AS DECIMAL(18,4)), 0) > ISNULL(TRY_CAST(cs.LegalAlertAmount AS DECIMAL(18,4)), 0)
+        AND DAY(GETDATE()) > ISNULL(TRY_CAST(cs.LegalAlertDays AS INT), 9999)
+      )
+      OR (
+        ISNULL(TRY_CAST(dt.${B} AS DECIMAL(18,4)), 0)
+          >= ISNULL(TRY_CAST(dt.${RT} AS DECIMAL(18,4)), 0)
+             * ISNULL(TRY_CAST(cs.LegalAlertMonths AS DECIMAL(18,4)), 0)
+      )
+    )
+    AND ${LEGAL_STATUS_OPEN_LEGACY}
+  THEN 1 ELSE 0
+END`;
+
+const REMOVE_LEGAL_LEGACY = `CASE
+  WHEN ISNULL(TRY_CAST(dt.${B} AS DECIMAL(18,4)), 0) <= 0
+    AND ${LEGAL_STATUS_NOT_BLANK_LEGACY}
+    AND LTRIM(RTRIM(CAST(dt.${LS} AS NVARCHAR(400)))) <> N'Case Closed'
+  THEN 1 ELSE 0
+END`;
+
+const DLQ_IN_LEGAL_LEGACY = `CASE
+  WHEN ${LEGAL_STATUS_NOT_BLANK_LEGACY}
     AND LTRIM(RTRIM(CAST(dt.${LS} AS NVARCHAR(400)))) <> N'Case Closed'
   THEN 1 ELSE 0 END`;
+
+function isMissingDbSchemaError(e) {
+  const msg = String(e?.message || "");
+  return /Invalid object name/i.test(msg) || /Invalid column name/i.test(msg);
+}
+
+function buildSummarySql(propScope, { legalCases, tenantFollowUp }) {
+  const joins = legalCases ? LEGAL_CASE_JOINS : "";
+  const missingCase = tenantFollowUp ? MISSING_TENANT_FOLLOWUP_CASE : "0";
+  const pastDueTenant = tenantFollowUp ? PAST_DUE_TENANT_FOLLOWUP_CASE : "0";
+  const pastDue = legalCases ? PAST_DUE_FOLLOWUP_CASE : PAST_DUE_FOLLOWUP_LEGACY;
+  const dueToday = legalCases ? DUE_TODAY_FOLLOWUP_CASE : DUE_TODAY_FOLLOWUP_LEGACY;
+  const requiresLegal = legalCases ? REQUIRES_LEGAL_CASE : REQUIRES_LEGAL_LEGACY;
+  const removeLegal = legalCases ? REMOVE_LEGAL_CASE : REMOVE_LEGAL_LEGACY;
+  const inLegal = legalCases ? DLQ_IN_LEGAL : DLQ_IN_LEGAL_LEGACY;
+  return `
+    SELECT
+      po.Name AS portfolio,
+      dt.${PR} AS property,
+      SUM(ISNULL(CAST(dt.${B} AS DECIMAL(18,2)), 0)) AS collection,
+      SUM(${missingCase}) AS alertsMissingTenantFollowUp,
+      SUM(${pastDueTenant}) AS alertsPastDueTenantFollowUp,
+      SUM(${pastDue}) AS alertsPastDueFollowUp,
+      SUM(${dueToday}) AS alertsDueTodayFollowUp,
+      SUM(${requiresLegal}) AS alertsRequiresLegal,
+      SUM(${removeLegal}) AS alertsRemoveLegal,
+      SUM(${DLQ_ZERO_BALANCE}) AS dq0,
+      SUM(${DLQ_LESS_THAN_ONE_MONTH}) AS dqLt1,
+      SUM(${DLQ_ONE_TO_UNDER_THREE_MONTHS}) AS dqMid,
+      SUM(${DLQ_THREE_PLUS_MONTHS}) AS dq3p,
+      SUM(${inLegal}) AS dqLeg,
+      MAX(ISNULL(occ.occupiedUnits, 0)) AS occupiedUnits,
+      SUM(CASE WHEN ${COLLECTION_LT1_PRED} THEN 1 ELSE 0 END) AS collectionLt1Count,
+      SUM(
+        CASE
+          WHEN ISNULL(TRY_CAST(dt.${RT} AS DECIMAL(18,4)), 0) > 0
+            AND ISNULL(TRY_CAST(dt.${B} AS DECIMAL(18,4)), 0)
+              >= TRY_CAST(dt.${RT} AS DECIMAL(18,4))
+          THEN 1 ELSE 0 END
+      ) AS collectionGe1Count
+    FROM DataTbl dt
+    INNER JOIN dbo.Properties pr ON pr.CompanyId = dt.${CC}
+      AND CAST(pr.Name AS NVARCHAR(400)) = CAST(dt.${PR} AS NVARCHAR(400))
+    INNER JOIN dbo.Portfolios po ON po.Id = pr.PortfolioId AND po.CompanyId = dt.${CC}
+    INNER JOIN dbo.Regions reg ON reg.Id = po.RegionId AND reg.CompanyId = dt.${CC}
+    LEFT JOIN (
+      SELECT
+        d_occ.${CC} AS occCompanyId,
+        LTRIM(RTRIM(CAST(d_occ.${PR} AS NVARCHAR(400)))) AS occPropNorm,
+        COUNT_BIG(1) AS occupiedUnits
+      FROM DataTbl d_occ
+      WHERE d_occ.${CC} = @companyId
+      GROUP BY d_occ.${CC}, LTRIM(RTRIM(CAST(d_occ.${PR} AS NVARCHAR(400))))
+    ) occ ON occ.occCompanyId = dt.${CC}
+      AND occ.occPropNorm = LTRIM(RTRIM(CAST(dt.${PR} AS NVARCHAR(400))))
+    LEFT JOIN dbo.CompanyCollectionSettings cs ON cs.CompanyId = dt.${CC}
+    ${joins}
+    WHERE dt.${CC} = @companyId
+      AND reg.Name = @region
+      AND dt.${PR} IS NOT NULL
+      ${propScope}
+    GROUP BY po.Name, dt.${PR}
+    HAVING po.Name IS NOT NULL AND dt.${PR} IS NOT NULL
+    ORDER BY po.Name, dt.${PR}
+  `;
+}
 
 async function getRegions(req, res) {
   const ctx = readCompanyContext(req, res);
@@ -292,62 +493,23 @@ async function getSummary(req, res) {
     region: { type: sql.NVarChar(400), value: region }
   };
   const propScope = dataTblPropertyScopeSql(ctx, inputs);
-  const text = `
-    SELECT
-      po.Name AS portfolio,
-      dt.${PR} AS property,
-      SUM(ISNULL(CAST(dt.${B} AS DECIMAL(18,2)), 0)) AS collection,
-      SUM(${MISSING_FOLLOWUP_CASE}) AS alertsMissingFollowUp,
-      SUM(${PAST_DUE_FOLLOWUP_CASE}) AS alertsPastDueFollowUp,
-      SUM(${DUE_TODAY_FOLLOWUP_CASE}) AS alertsDueTodayFollowUp,
-      SUM(${REQUIRES_LEGAL_CASE}) AS alertsRequiresLegal,
-      SUM(${REMOVE_LEGAL_CASE}) AS alertsRemoveLegal,
-      SUM(${DLQ_ZERO_BALANCE}) AS dq0,
-      SUM(${DLQ_LESS_THAN_ONE_MONTH}) AS dqLt1,
-      SUM(${DLQ_ONE_TO_UNDER_THREE_MONTHS}) AS dqMid,
-      SUM(${DLQ_THREE_PLUS_MONTHS}) AS dq3p,
-      SUM(${DLQ_IN_LEGAL}) AS dqLeg,
-      MAX(ISNULL(occ.occupiedUnits, 0)) AS occupiedUnits,
-      SUM(
-        CASE
-          WHEN ISNULL(TRY_CAST(dt.${RT} AS DECIMAL(18,4)), 0) > 0
-            AND ISNULL(TRY_CAST(dt.${B} AS DECIMAL(18,4)), 0)
-              < TRY_CAST(dt.${RT} AS DECIMAL(18,4))
-          THEN 1 ELSE 0 END
-      ) AS collectionLt1Count,
-      SUM(
-        CASE
-          WHEN ISNULL(TRY_CAST(dt.${RT} AS DECIMAL(18,4)), 0) > 0
-            AND ISNULL(TRY_CAST(dt.${B} AS DECIMAL(18,4)), 0)
-              >= TRY_CAST(dt.${RT} AS DECIMAL(18,4))
-          THEN 1 ELSE 0 END
-      ) AS collectionGe1Count
-    FROM DataTbl dt
-    INNER JOIN dbo.Properties pr ON pr.CompanyId = dt.${CC}
-      AND CAST(pr.Name AS NVARCHAR(400)) = CAST(dt.${PR} AS NVARCHAR(400))
-    INNER JOIN dbo.Portfolios po ON po.Id = pr.PortfolioId AND po.CompanyId = dt.${CC}
-    INNER JOIN dbo.Regions reg ON reg.Id = po.RegionId AND reg.CompanyId = dt.${CC}
-    LEFT JOIN (
-      SELECT
-        d_occ.${CC} AS occCompanyId,
-        LTRIM(RTRIM(CAST(d_occ.${PR} AS NVARCHAR(400)))) AS occPropNorm,
-        COUNT_BIG(1) AS occupiedUnits
-      FROM DataTbl d_occ
-      WHERE d_occ.${CC} = @companyId
-        AND ISNULL(TRY_CAST(d_occ.${RT} AS DECIMAL(18,4)), 0) > 0
-      GROUP BY d_occ.${CC}, LTRIM(RTRIM(CAST(d_occ.${PR} AS NVARCHAR(400))))
-    ) occ ON occ.occCompanyId = dt.${CC}
-      AND occ.occPropNorm = LTRIM(RTRIM(CAST(dt.${PR} AS NVARCHAR(400))))
-    LEFT JOIN dbo.CompanyCollectionSettings cs ON cs.CompanyId = dt.${CC}
-    WHERE dt.${CC} = @companyId
-      AND reg.Name = @region
-      AND dt.${PR} IS NOT NULL
-      ${propScope}
-    GROUP BY po.Name, dt.${PR}
-    HAVING po.Name IS NOT NULL AND dt.${PR} IS NOT NULL
-    ORDER BY po.Name, dt.${PR}
-  `;
-  const result = await query(text, inputs);
+  const summaryAttempts = [
+    { legalCases: true, tenantFollowUp: true },
+    { legalCases: false, tenantFollowUp: true },
+    { legalCases: false, tenantFollowUp: false }
+  ];
+  let result;
+  let lastErr;
+  for (const opts of summaryAttempts) {
+    try {
+      result = await query(buildSummarySql(propScope, opts), inputs);
+      break;
+    } catch (e) {
+      lastErr = e;
+      if (!isMissingDbSchemaError(e)) throw e;
+    }
+  }
+  if (!result) throw lastErr || new Error("Dashboard summary query failed");
   const byPortfolio = new Map();
   for (const row of result.recordset) {
     const key = row.portfolio;
@@ -367,13 +529,19 @@ async function getSummary(req, res) {
           row.CollectionGe1Count
       ) || 0;
     const denom = occupied > 0 ? occupied : lt1 + ge1;
-    const lt1Pct = denom === 0 ? 0 : Math.round((100 * lt1) / denom);
-    const ge1Pct = denom === 0 ? 0 : Math.round((100 * ge1) / denom);
-    const missingFu =
+    const lt1Pct = percentOf(lt1, denom);
+    const ge1Pct = percentOf(ge1, denom);
+    const missingTenantFu =
       Number(
-        row.alertsMissingFollowUp ??
-          row.alertsmissingfollowup ??
-          row.AlertsMissingFollowUp
+        row.alertsMissingTenantFollowUp ??
+          row.alertsmissingtenantfollowup ??
+          row.AlertsMissingTenantFollowUp
+      ) || 0;
+    const pastDueTenantFu =
+      Number(
+        row.alertsPastDueTenantFollowUp ??
+          row.alertspastduetenantfollowup ??
+          row.AlertsPastDueTenantFollowUp
       ) || 0;
     const pastDueFu =
       Number(
@@ -433,7 +601,8 @@ async function getSummary(req, res) {
       collectionLessThanOneMonth: { count: lt1, percent: lt1Pct },
       collectionOneMonthOrMore: { count: ge1, percent: ge1Pct },
       alerts: {
-        missingFollowUp: missingFu,
+        missingTenantFollowUp: missingTenantFu,
+        pastDueTenantFollowUp: pastDueTenantFu,
         pastDueFollowUp: pastDueFu,
         dueTodayFollowUp: dueTodayFu,
         requiresLegal: requiresLegalN,
@@ -457,7 +626,9 @@ async function getSummary(req, res) {
 }
 
 const UNIT_ALERT_FILTERS = new Set([
+  "missingTenantFollowUp",
   "missingFollowUp",
+  "pastDueTenantFollowUp",
   "pastDueFollowUp",
   "dueTodayFollowUp",
   "requiresLegal",
@@ -518,6 +689,100 @@ function parsePropertiesList(req) {
   return [];
 }
 
+function buildUnitsQueryText(
+  opts,
+  {
+    inPlaceholders,
+    nameSearch,
+    unitSearch,
+    legalStatus,
+    collection,
+    alert,
+    delinq
+  }
+) {
+  const { legalCases, tenantFollowUp } = opts;
+  const joins = legalCases ? LEGAL_CASE_JOINS : "";
+  const tfSelect = tenantFollowUp
+    ? `dt.${TF} AS tenantFollowUp,`
+    : `CAST(NULL AS DATETIME2) AS tenantFollowUp,`;
+  const pastDue = legalCases ? PAST_DUE_FOLLOWUP_CASE : PAST_DUE_FOLLOWUP_LEGACY;
+  const dueToday = legalCases ? DUE_TODAY_FOLLOWUP_CASE : DUE_TODAY_FOLLOWUP_LEGACY;
+  const requiresLegal = legalCases ? REQUIRES_LEGAL_CASE : REQUIRES_LEGAL_LEGACY;
+  const removeLegal = legalCases ? REMOVE_LEGAL_CASE : REMOVE_LEGAL_LEGACY;
+  const inLegalFilter = legalCases
+    ? `${LEGAL_STATUS_NOT_BLANK} AND ${EFFECTIVE_LS_EXPR} <> N'Case Closed'`
+    : `${LEGAL_STATUS_NOT_BLANK_LEGACY}
+      AND LTRIM(RTRIM(CAST(dt.${LS} AS NVARCHAR(400)))) <> N'Case Closed'`;
+
+  let text = `
+    SELECT
+      dt.${PR} AS property,
+      dt.${U} AS unit,
+      dt.${N} AS name,
+      dt.${B} AS balance,
+      dt.${RT} AS rent,
+      ${MD_EXPR} AS monthsDelinquent,
+      dt.${LS} AS legalStatus,
+      dt.${NF} AS nextFollowUp,
+      ${tfSelect}
+      dt.${LPD} AS lastPaymentDate,
+      dt.${LPA} AS lastPaymentAmount,
+      dt.${PH} AS phone,
+      dt.${EM} AS email,
+      NULLIF(LTRIM(RTRIM(CAST(dt.[TenantCode] AS NVARCHAR(400)))), N'') AS tenantCode,
+      NULLIF(LTRIM(RTRIM(CAST(dt.${HP} AS NVARCHAR(400)))), N'') AS hmyperson,
+      (SELECT TOP 1 CAST(csErp.ErpStaticLink AS NVARCHAR(2000))
+       FROM dbo.CompanyCollectionSettings csErp
+       WHERE csErp.CompanyId = @companyId) AS companyErpStaticLink
+    FROM dbo.DataTbl dt
+    LEFT JOIN dbo.CompanyCollectionSettings cs ON cs.CompanyId = dt.${CC}
+    ${joins}
+    WHERE dt.${CC} = @companyId AND dt.${PR} IN (${inPlaceholders})
+  `;
+
+  if (nameSearch) {
+    text += ` AND CAST(dt.${N} AS NVARCHAR(400)) LIKE @namePat`;
+  }
+  if (unitSearch) {
+    text += ` AND CAST(dt.${U} AS NVARCHAR(400)) LIKE @unitPat`;
+  }
+  if (legalStatus) {
+    text += ` AND dt.${LS} = @legalStatus`;
+  }
+
+  if (collection === "lt1") {
+    text += ` AND ${COLLECTION_LT1}`;
+  } else if (collection === "ge1") {
+    text += ` AND ${COLLECTION_GE1}`;
+  } else if ((alert === "missingTenantFollowUp" || alert === "missingFollowUp") && tenantFollowUp) {
+    text += ` AND (${MISSING_TENANT_FOLLOWUP_CASE}) = 1`;
+  } else if (alert === "pastDueTenantFollowUp" && tenantFollowUp) {
+    text += ` AND (${PAST_DUE_TENANT_FOLLOWUP_CASE}) = 1`;
+  } else if (alert === "pastDueFollowUp") {
+    text += ` AND (${pastDue}) = 1`;
+  } else if (alert === "dueTodayFollowUp") {
+    text += ` AND (${dueToday}) = 1`;
+  } else if (alert === "requiresLegal") {
+    text += ` AND (${requiresLegal}) = 1`;
+  } else if (alert === "removeLegal") {
+    text += ` AND (${removeLegal}) = 1`;
+  } else if (delinq === "zeroBalance") {
+    text += ` AND ${DT_BAL} <= 0`;
+  } else if (delinq === "lessThanOneMonth") {
+    text += ` AND ${DELINQ_LT1}`;
+  } else if (delinq === "oneToUnderThreeMonths") {
+    text += ` AND ${DT_RENT} > 0 AND ${DT_BAL} >= ${DT_RENT} AND ${DT_BAL} < 3 * ${DT_RENT}`;
+  } else if (delinq === "threePlusMonths") {
+    text += ` AND ${DT_RENT} > 0 AND ${DT_BAL} >= 3 * ${DT_RENT}`;
+  } else if (delinq === "inLegal") {
+    text += ` AND ${inLegalFilter}`;
+  }
+
+  text += ` ORDER BY dt.${PR}, dt.${U}, dt.${N}`;
+  return text;
+}
+
 async function getUnits(req, res) {
   const ctx = readCompanyContext(req, res);
   if (!ctx) return;
@@ -544,82 +809,49 @@ async function getUnits(req, res) {
   const alert = UNIT_ALERT_FILTERS.has(alertRaw) ? alertRaw : "";
   const delinqRaw = req.query.delinq ? String(req.query.delinq).trim() : "";
   const delinq = UNIT_DELINQ_FILTERS.has(delinqRaw) ? delinqRaw : "";
-  const occRaw = req.query.occupied ? String(req.query.occupied).trim().toLowerCase() : "";
-  const occupiedOnly = occRaw === "1" || occRaw === "true";
 
   const inPlaceholders = allowed.map((_, i) => `@prop${i}`).join(", ");
-  let text = `
-    SELECT
-      dt.${PR} AS property,
-      dt.${U} AS unit,
-      dt.${N} AS name,
-      dt.${B} AS balance,
-      dt.${RT} AS rent,
-      ${MD_EXPR} AS monthsDelinquent,
-      dt.${LS} AS legalStatus,
-      dt.${NF} AS nextFollowUp,
-      dt.${TF} AS tenantFollowUp,
-      dt.${LPD} AS lastPaymentDate,
-      dt.${LPA} AS lastPaymentAmount,
-      dt.${PH} AS phone,
-      dt.${EM} AS email,
-      NULLIF(LTRIM(RTRIM(CAST(dt.[TenantCode] AS NVARCHAR(400)))), N'') AS tenantCode,
-      NULLIF(LTRIM(RTRIM(CAST(dt.${HP} AS NVARCHAR(400)))), N'') AS hmyperson,
-      (SELECT TOP 1 CAST(csErp.ErpStaticLink AS NVARCHAR(2000))
-       FROM dbo.CompanyCollectionSettings csErp
-       WHERE csErp.CompanyId = @companyId) AS companyErpStaticLink
-    FROM dbo.DataTbl dt
-    LEFT JOIN dbo.CompanyCollectionSettings cs ON cs.CompanyId = dt.${CC}
-    WHERE dt.${CC} = @companyId AND dt.${PR} IN (${inPlaceholders})
-  `;
   const inputs = { companyId: { type: sql.Int, value: companyId } };
   allowed.forEach((name, i) => {
     inputs[`prop${i}`] = { type: sql.NVarChar(400), value: name };
   });
   if (nameSearch) {
-    text += ` AND CAST(dt.${N} AS NVARCHAR(400)) LIKE @namePat`;
     inputs.namePat = { type: sql.NVarChar(400), value: `%${nameSearch}%` };
   }
   if (unitSearch) {
-    text += ` AND CAST(dt.${U} AS NVARCHAR(400)) LIKE @unitPat`;
     inputs.unitPat = { type: sql.NVarChar(400), value: `%${unitSearch}%` };
   }
   if (legalStatus) {
-    text += ` AND dt.${LS} = @legalStatus`;
     inputs.legalStatus = { type: sql.NVarChar(400), value: legalStatus };
   }
 
-  if (collection === "lt1") {
-    text += ` AND ${DT_RENT} > 0 AND ${DT_BAL} < ${DT_RENT}`;
-  } else if (collection === "ge1") {
-    text += ` AND ${DT_RENT} > 0 AND ${DT_BAL} >= ${DT_RENT}`;
-  } else if (alert === "missingFollowUp") {
-    text += ` AND (${MISSING_FOLLOWUP_CASE}) = 1`;
-  } else if (alert === "pastDueFollowUp") {
-    text += ` AND (${PAST_DUE_FOLLOWUP_CASE}) = 1`;
-  } else if (alert === "dueTodayFollowUp") {
-    text += ` AND (${DUE_TODAY_FOLLOWUP_CASE}) = 1`;
-  } else if (alert === "requiresLegal") {
-    text += ` AND (${REQUIRES_LEGAL_CASE}) = 1`;
-  } else if (alert === "removeLegal") {
-    text += ` AND (${REMOVE_LEGAL_CASE}) = 1`;
-  } else if (delinq === "zeroBalance") {
-    text += ` AND ${DT_BAL} <= 0`;
-  } else if (delinq === "lessThanOneMonth") {
-    text += ` AND ${DT_RENT} > 0 AND ${DT_BAL} > 0 AND ${DT_BAL} < ${DT_RENT}`;
-  } else if (delinq === "oneToUnderThreeMonths") {
-    text += ` AND ${DT_RENT} > 0 AND ${DT_BAL} >= ${DT_RENT} AND ${DT_BAL} < 3 * ${DT_RENT}`;
-  } else if (delinq === "threePlusMonths") {
-    text += ` AND ${DT_RENT} > 0 AND ${DT_BAL} >= 3 * ${DT_RENT}`;
-  } else if (delinq === "inLegal") {
-    text += ` AND ${LEGAL_STATUS_NOT_BLANK}
-      AND LTRIM(RTRIM(CAST(dt.${LS} AS NVARCHAR(400)))) <> N'Case Closed'`;
-  } else if (occupiedOnly) {
-    text += ` AND ${DT_RENT} > 0`;
+  const filterCtx = {
+    inPlaceholders,
+    nameSearch,
+    unitSearch,
+    legalStatus,
+    collection,
+    alert,
+    delinq
+  };
+  const unitAttempts = [
+    { legalCases: true, tenantFollowUp: true },
+    { legalCases: false, tenantFollowUp: true },
+    { legalCases: false, tenantFollowUp: false }
+  ];
+  let result;
+  let lastErr;
+  for (const opts of unitAttempts) {
+    try {
+      const text = buildUnitsQueryText(opts, filterCtx);
+      result = await query(text, inputs);
+      break;
+    } catch (e) {
+      lastErr = e;
+      if (!isMissingDbSchemaError(e)) throw e;
+    }
   }
-
-  text += ` ORDER BY dt.${PR}, dt.${U}, dt.${N}`;
-  const result = await query(text, inputs);
+  if (!result) throw lastErr || new Error("Units query failed");
   const rows = result.recordset || [];
 
   function pickCompanyErpStaticLink(row) {
@@ -662,6 +894,19 @@ async function getUnits(req, res) {
         if (key.toLowerCase().replace(/[\s_]/g, "") === "tenantfollowup" && key !== "tenantFollowUp") {
           delete copy[key];
         }
+      }
+    }
+    const phoneKey = Object.keys(copy).find(
+      (x) =>
+        x.toLowerCase().replace(/[\s_]/g, "") === "phone" ||
+        x.toLowerCase().replace(/[\s_]/g, "") === "phomenumber"
+    );
+    if (phoneKey !== undefined) {
+      const v = copy[phoneKey];
+      copy.phone = v == null || v === "" ? null : String(v).trim();
+      for (const key of Object.keys(copy)) {
+        const norm = key.toLowerCase().replace(/[\s_]/g, "");
+        if ((norm === "phone" || norm === "phomenumber") && key !== "phone") delete copy[key];
       }
     }
     return copy;
@@ -837,9 +1082,9 @@ async function getUnits(req, res) {
       });
       const notePlaceholders = allowed.map((_, i) => `@noteProp${i}`).join(", ");
       const noteRes = await query(
-        `SELECT PropertyName, Unit, TenantName, Body
+        `SELECT PropertyName, Unit, TenantName, Body, CreatedAt
          FROM (
-           SELECT n.PropertyName, n.Unit, n.TenantName, n.Body,
+           SELECT n.PropertyName, n.Unit, n.TenantName, n.Body, n.CreatedAt,
                   ROW_NUMBER() OVER (
                     PARTITION BY n.PropertyName, n.Unit, n.TenantName
                     ORDER BY n.CreatedAt DESC, n.Id DESC
@@ -858,11 +1103,25 @@ async function getUnits(req, res) {
       for (const r of noteRes.recordset || []) {
         const k = key(r.PropertyName, r.Unit, r.TenantName);
         const body = r.Body == null ? "" : String(r.Body);
-        noteMap.set(k, body);
+        const rawAt = r.CreatedAt ?? r.createdAt;
+        const createdAt =
+          rawAt instanceof Date
+            ? rawAt.toISOString()
+            : rawAt == null || rawAt === ""
+              ? null
+              : String(rawAt);
+        noteMap.set(k, { body, createdAt });
       }
       for (const u of units) {
         const k = key(u.property, u.unit, u.name);
-        u.note = noteMap.has(k) ? noteMap.get(k) : "";
+        if (noteMap.has(k)) {
+          const entry = noteMap.get(k);
+          u.note = entry.body;
+          u.noteAt = entry.createdAt;
+        } else {
+          u.note = "";
+          u.noteAt = null;
+        }
       }
     } catch (e) {
       if (!/Invalid object name/i.test(String(e?.message || ""))) throw e;
@@ -1305,6 +1564,86 @@ async function getUnitLegalHistory(req, res) {
   }
 }
 
+async function getUserUnitDetailColumnPrefs(req, res) {
+  const ctx = readCompanyContext(req, res);
+  if (!ctx) return;
+  const firebaseUid = String(ctx.userId || "").trim();
+  if (!firebaseUid) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  try {
+    const result = await query(
+      `SELECT PrefsJson AS prefs
+       FROM dbo.UserUnitDetailColumnPrefs
+       WHERE FirebaseUid = @firebaseUid`,
+      { firebaseUid: { type: sql.NVarChar(128), value: firebaseUid } }
+    );
+    const row = result.recordset[0];
+    const parsed = parsePrefsJson(row?.prefs ?? row?.Prefs);
+    const normalized = normalizeUnitDetailColumnPrefs(parsed || {});
+    return res.json({
+      columnOrder: normalized.columnOrder,
+      hidden: normalized.hidden
+    });
+  } catch (err) {
+    if (/Invalid object name/i.test(String(err?.message || ""))) {
+      const normalized = normalizeUnitDetailColumnPrefs({});
+      return res.json({
+        columnOrder: normalized.columnOrder,
+        hidden: normalized.hidden
+      });
+    }
+    throw err;
+  }
+}
+
+async function putUserUnitDetailColumnPrefs(req, res) {
+  const ctx = readCompanyContext(req, res);
+  if (!ctx) return;
+  const firebaseUid = String(ctx.userId || "").trim();
+  if (!firebaseUid) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const normalized = normalizeUnitDetailColumnPrefs(req.body || {});
+  const json = JSON.stringify({
+    columnOrder: normalized.columnOrder,
+    hidden: normalized.hidden
+  });
+  if (json.length > 4000) {
+    return res.status(400).json({ error: "Column preferences JSON is too large (max 4000 characters)." });
+  }
+
+  try {
+    await query(
+      `MERGE dbo.UserUnitDetailColumnPrefs AS t
+       USING (SELECT @firebaseUid AS FirebaseUid) AS s ON t.FirebaseUid = s.FirebaseUid
+       WHEN MATCHED THEN
+         UPDATE SET PrefsJson = @prefsJson, UpdatedAt = SYSUTCDATETIME()
+       WHEN NOT MATCHED THEN
+         INSERT (FirebaseUid, PrefsJson) VALUES (@firebaseUid, @prefsJson);`,
+      {
+        firebaseUid: { type: sql.NVarChar(128), value: firebaseUid },
+        prefsJson: { type: sql.NVarChar(4000), value: json }
+      }
+    );
+  } catch (err) {
+    if (/Invalid column name/i.test(String(err?.message || ""))) {
+      return res.status(503).json({
+        error:
+          "Table UserUnitDetailColumnPrefs is missing. Run backend/scripts/migrate-user-unit-detail-column-prefs.sql"
+      });
+    }
+    throw err;
+  }
+
+  res.json({
+    columnOrder: normalized.columnOrder,
+    hidden: normalized.hidden
+  });
+}
+
 module.exports = {
   getRegions,
   getPortfolios,
@@ -1316,5 +1655,7 @@ module.exports = {
   postUnitNote,
   patchUnitNote,
   deleteUnitNote,
-  getUnitLegalHistory
+  getUnitLegalHistory,
+  getUserUnitDetailColumnPrefs,
+  putUserUnitDetailColumnPrefs
 };

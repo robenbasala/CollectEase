@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { Building2 } from "lucide-react";
 import { Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
+import { APP_LOGO_URL } from "./lib/appLogo.js";
 import { api } from "./api/apiClient";
 import { useAuth } from "./context/AuthContext.jsx";
 import Navbar from "./components/Navbar";
@@ -23,7 +23,7 @@ function NoInvitationPage({ onSignOut }) {
       <div className="auth-glass auth-glass--narrow">
         <div className="auth-glass__brand">
           <span className="auth-glass__logo-wrap" aria-hidden>
-            <Building2 size={22} strokeWidth={2.1} />
+            <img src={APP_LOGO_URL} alt="" className="auth-glass__logo-img" width={28} height={28} />
           </span>
           <span className="auth-glass__name">CollectEase</span>
         </div>
@@ -92,7 +92,7 @@ function AppLayout() {
   const [selectedRegion, setSelectedRegion] = useState("");
   const [loadingRegions, setLoadingRegions] = useState(true);
   const [navError, setNavError] = useState("");
-  const [branding, setBranding] = useState({ logoDataUrl: null, companyDisplayName: null });
+  const [branding, setBranding] = useState({ logoDataUrl: null, companyDisplayName: null, companyName: null });
 
   const isSettingsRoute = location.pathname === "/settings";
   const showNavError =
@@ -140,7 +140,8 @@ function AppLayout() {
         if (cancelled || !s) return;
         setBranding({
           logoDataUrl: s.logoDataUrl || null,
-          companyDisplayName: s.companyDisplayName || null
+          companyDisplayName: s.companyDisplayName || null,
+          companyName: s.companyName || null
         });
       } catch {
         /* optional */
@@ -157,7 +158,8 @@ function AppLayout() {
       if (!s) return;
       setBranding({
         logoDataUrl: s.logoDataUrl || null,
-        companyDisplayName: s.companyDisplayName || null
+        companyDisplayName: s.companyDisplayName || null,
+        companyName: s.companyName || null
       });
     }
     window.addEventListener("ct:company-settings-updated", onCompanySettingsUpdated);
